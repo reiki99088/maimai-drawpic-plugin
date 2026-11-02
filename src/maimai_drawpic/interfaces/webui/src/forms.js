@@ -39,7 +39,7 @@
     if (type === "integer" || type === "number")
       return `<input id="${id}" type="number" data-input="${e(key)}" value="${e(value)}" step="${meta.step || (type === "integer" ? 1 : "any")}" ${meta.min != null ? `min="${e(meta.min)}"` : ""} ${meta.max != null ? `max="${e(meta.max)}"` : ""}>`;
     const secret = key === "api_key" || key === "password";
-    const multiline = /prompt|description|artist|extra_parameters/.test(key);
+    const multiline = /prompt|description|artist|extra_parameters|instructions/.test(key);
     if (multiline && !secret)
       return `<textarea id="${id}" rows="${meta.rows || 3}" data-input="${e(key)}" maxlength="16000">${e(value)}</textarea>`;
     const models = /^(default_model|fallback_model)$/.test(key);

@@ -66,6 +66,13 @@ class ProviderConnectionError(ProviderError):
     allow_fallback = True
 
 
+class ProviderBusyError(ProviderConnectionError):
+    """本地排队已满或排队超时，请求尚未发出；不在同一模型重试，可切换备选模型。"""
+
+    retryable = False
+    allow_fallback = True
+
+
 class ProviderSubmittedError(ProviderResultError):
     """保留已受理的远端 ID；后续失败绝不能重新提交生成。"""
 

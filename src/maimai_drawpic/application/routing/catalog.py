@@ -198,11 +198,18 @@ class ModelCatalogMixin:
             + self.get_novelai_models()
             + self.get_comfyui_models()
             + self.get_agnes_models()
+            + self.get_codex_models()
         )
 
     def get_agnes_models(self) -> List[str]:
         """获取已启用 Agnes 实例的图片模型。"""
         return [model.strip() for model in self.config.agnes.models if model.strip()] if self.config.agnes.enabled else []
+
+    def get_codex_models(self) -> List[str]:
+        """获取已启用 Codex 智能体实例的对话模型。"""
+        if not self.config.codex.enabled:
+            return []
+        return list(dict.fromkeys(model.strip() for model in self.config.codex.models if model.strip()))
 
     def get_model_provider(self, model: str) -> ProviderName | Literal[""]:
         """根据模型名称判断其所属提供商。"""
@@ -226,4 +233,6 @@ class ModelCatalogMixin:
             return "novelai"
         if normalized_model in self.get_comfyui_models():
             return "comfyui"
+        if normalized_model in self.get_codex_models():
+            return "codex"
         return ""

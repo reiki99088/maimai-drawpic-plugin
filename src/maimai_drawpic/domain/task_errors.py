@@ -22,6 +22,10 @@ class TaskRequestError(ValueError):
         self.retry_submit = retry_submit
 
 
+class ModelAccessError(PermissionError):
+    """模型使用范围限制（如仅管理员），与次数不足区分提示。"""
+
+
 def provider_task_error(failure: ProviderError, message: str) -> Dict[str, Any]:
     if failure.rejected:
         return task_error("MODERATION_REJECTED", message)

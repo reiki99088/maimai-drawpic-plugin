@@ -15,7 +15,7 @@ from ...infrastructure.storage.results import ImageResultStore
 from ...infrastructure.storage.atomic import write_json_atomically
 from ...domain.styles import StylePromptResolver
 from ...infrastructure.storage.tasks import DrawTaskStore
-from ...domain.task_errors import TaskRequestError, task_error
+from ...domain.task_errors import ModelAccessError, TaskRequestError, task_error
 from ..drawing.admission import update_task_owned
 from .preferences import validate_preferences
 
@@ -206,6 +206,16 @@ class WorkspaceTaskService:
             service = self.get_service()
             router = service.router
             resolved_model = router.resolve_model_name(model, allow_unknown_model=False)
+            # 工作台由宿主管理页面访问，视为管理员；插件 API 不带会话时无法确认请求者身份。
+            trusted_origin = origin == "webui"
+            requires_admin = getattr(router, "model_requires_admin", None)
+            if not trusted_origin and not stream_id and requires_admin is not None and requires_admin(resolved_model):
+                raise ModelAccessError(f"模型 {resolved_model} 仅限插件管理员使用；插件 API 需提供管理员的真实会话")
+            if not stream_id:
+                # 带会话的提交由聊天提交流程检查队列；这里只覆盖不回传聊天的任务。
+                ensure_capacity = getattr(router, "ensure_agent_capacity", None)
+                if ensure_capacity is not None:
+                    ensure_capacity(resolved_model)
             capability = router.evaluate_model_task_capability(resolved_model, task_type)
             if not capability.allowed:
                 raise ValueError(capability.reason)
@@ -243,6 +253,7 @@ class WorkspaceTaskService:
                     notify_start=False,
                     defer_prompt_review=True,
                     submission=submission,
+                    **({"restricted_models_allowed": True} if trusted_origin else {}),
                 )
             else:
                 result = await service.start_background_image_request(
@@ -257,6 +268,7 @@ class WorkspaceTaskService:
                     source_image_bytes_list=images,
                     prompt_reviewed=False,
                     submission=submission,
+                    restricted_models_allowed=trusted_origin,
                 )
             task_id = result["task_id"]
             self.metadata[task_id] = submission

@@ -295,8 +295,8 @@ error 为 null 或对象：`code/message/retry_query/retry_submit`。message 为
 | INVALID_REQUEST | 参数或模型能力不符，修正请求 |
 | STREAM_UNAVAILABLE | 受理前已确认聊天流不可用，校验发送去向；不是提交状态未知 |
 | REQUEST_ID_CONFLICT | 相同键配不同参数，停止并核对调用方状态 |
-| CONCURRENCY_LIMIT | 4 个后台任务已满，稍后用原参数/键提交 |
-| PERMISSION_DENIED | 聊天额度或权限拒绝 |
+| CONCURRENCY_LIMIT | 4 个后台任务已满，或 Codex 智能体的运行与排队名额已满；稍后用原参数/键提交 |
+| PERMISSION_DENIED | 聊天额度或权限拒绝；使用范围为“仅管理员”的模型（如 Codex 智能体）需提供管理员的真实会话，不带会话的插件提交一律拒绝 |
 | TASK_NOT_FOUND | 记录不存在或被淘汰，核对保留范围 |
 | REQUEST_NOT_FOUND | 原请求记录未找到，先核对受理进度、保留范围及提供商记录，不自动重画 |
 | MODERATION_REJECTED | 审核拒绝，不自动重画 |

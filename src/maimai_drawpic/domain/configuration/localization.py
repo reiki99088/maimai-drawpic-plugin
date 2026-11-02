@@ -112,6 +112,14 @@ _SECTION_TEXTS: Dict[str, Tuple[Tuple[str, str, str], Tuple[str, str, str]]] = {
             "로컬 ComfyUI 워크플로 설정입니다.",
         ),
     ),
+    "CodexAgentConfig": (
+        ("Codex Agent Settings", "Codex エージェント設定", "Codex 에이전트 설정"),
+        (
+            "Local Codex CLI agent that researches references and generates images.",
+            "ローカルの Codex CLI エージェントが資料を調べて画像を生成します。",
+            "로컬 Codex CLI 에이전트가 자료를 조사하고 이미지를 생성합니다.",
+        ),
+    ),
     "PromptModerationConfig": (
         ("Prompt Review", "プロンプト審査", "프롬프트 검토"),
         ("Prompt review settings.", "プロンプト審査の設定です。", "프롬프트 검토 설정입니다."),
@@ -123,6 +131,20 @@ _SECTION_TEXTS: Dict[str, Tuple[Tuple[str, str, str], Tuple[str, str, str]]] = {
 }
 
 _FIELD_LABELS: Dict[str, Tuple[str, str, str]] = {
+    "access_scope": ("Access Scope", "利用範囲", "사용 범위"),
+    "agent_instructions": ("Agent Instructions", "エージェント指示", "에이전트 지침"),
+    "allow_proxy_fake_ip": ("Allow Proxy Fake-IP Addresses", "プロキシの fake-ip を許可", "프록시 fake-ip 주소 허용"),
+    "codex_home": ("CODEX_HOME Directory", "CODEX_HOME ディレクトリ", "CODEX_HOME 디렉터리"),
+    "codex_path": ("Codex Executable", "Codex 実行ファイル", "Codex 실행 파일"),
+    "deliver_all_images": ("Send All Images of the Turn", "このターンの全画像を送信", "이번 턴의 모든 이미지 전송"),
+    "max_concurrent_tasks": ("Concurrent Tasks", "同時実行タスク数", "동시 실행 작업 수"),
+    "max_queued_tasks": ("Maximum Queued Tasks", "最大待機タスク数", "최대 대기 작업 수"),
+    "queue_timeout_seconds": ("Queue Wait Limit (Seconds)", "待機時間の上限（秒）", "대기 시간 한도(초)"),
+    "max_reference_downloads": ("Reference Downloads per Task", "タスクごとの参照画像ダウンロード数", "작업당 참조 이미지 다운로드 수"),
+    "reasoning_effort": ("Reasoning Effort", "推論強度", "추론 강도"),
+    "resume_enabled": ("Resume Source Session for Edits", "再調整で元のセッションを継続", "재조정 시 원래 세션 이어가기"),
+    "task_timeout_seconds": ("Task Timeout (Seconds)", "タスクのタイムアウト（秒）", "작업 시간 제한(초)"),
+    "thread_retention_days": ("Session Retention (Days)", "セッション保持日数", "세션 보존 일수"),
     "ratio": ("Aspect Ratio", "アスペクト比", "화면 비율"),
     "image_cache_max_mb": ("Image Cache Limit (MB)", "画像キャッシュ上限（MB）", "이미지 캐시 한도(MB)"),
     "log_max_mb": ("Total Log Limit (MB)", "ログ合計上限（MB）", "전체 로그 한도(MB)"),
@@ -405,6 +427,8 @@ _FIELD_LABEL_OVERRIDES: Dict[str, Tuple[str, str, str]] = {
     "NovelAIModelConfig.api_key": ("NovelAI API Key", "NovelAI API キー", "NovelAI API 키"),
     "NovelAIModelConfig.models": ("NovelAI Models", "NovelAI モデル一覧", "NovelAI 모델 목록"),
     "ComfyUIModelConfig.enabled": ("Enable ComfyUI", "ComfyUI を有効化", "ComfyUI 활성화"),
+    "CodexAgentConfig.enabled": ("Enable Codex Agent Platform", "Codex エージェントを有効化", "Codex 에이전트 플랫폼 활성화"),
+    "CodexAgentConfig.models": ("Codex Chat Models", "Codex 対話モデル", "Codex 대화 모델"),
     "PromptModerationConfig.enabled": ("Enable Prompt Review", "プロンプト審査を有効化", "프롬프트 검토 활성화"),
     "PromptModerationConfig.review_prompt": ("Prompt Review Instructions", "プロンプト審査指示", "프롬프트 검토 지침"),
     "ImageModerationConfig.enabled": (
@@ -435,6 +459,84 @@ _OPENAI_MODE_HINTS = (
 
 
 _FIELD_HINT_OVERRIDES: Dict[str, Tuple[str, str, str]] = {
+    "CodexAgentConfig.access_scope": (
+        "admin follows the general permission setting: only plugin administrators may use it (everyone when command "
+        "permissions are disabled). all allows every user. The agent browses the web and consumes Codex quota.",
+        "admin は一般設定の権限管理に従い、プラグイン管理者のみ使用できます（権限管理が無効なら全員）。"
+        "all は全ユーザーが使用できます。エージェントはウェブを検索し Codex の利用枠を消費します。",
+        "admin은 일반 설정의 권한 관리를 따르며 플러그인 관리자만 사용할 수 있습니다(권한 관리가 꺼져 있으면 모두). "
+        "all은 모든 사용자가 사용할 수 있습니다. 에이전트는 웹을 검색하고 Codex 사용량을 소모합니다.",
+    ),
+    "CodexAgentConfig.models": (
+        "Chat models available in Codex. Images are produced by Codex's built-in image tool, which picks the image model.",
+        "Codex で利用できる対話モデルを入力します。画像は Codex 内蔵の画像ツールが生成し、画像モデルは Codex が選びます。",
+        "Codex에서 사용 가능한 대화 모델을 입력하세요. 이미지는 Codex 내장 이미지 도구가 생성하며 이미지 모델은 Codex가 결정합니다.",
+    ),
+    "CodexAgentConfig.reasoning_effort": (
+        "default keeps the Codex default. Higher effort researches more thoroughly but takes longer and uses more quota.",
+        "default は Codex の既定値を使用します。強度が高いほど調査は丁寧になりますが、時間と利用枠を多く消費します。",
+        "default는 Codex 기본값을 사용합니다. 강도가 높을수록 조사가 충실하지만 시간과 사용량이 늘어납니다.",
+    ),
+    "CodexAgentConfig.codex_path": (
+        "Leave empty to search PATH and the newest Codex desktop codex.exe under %LOCALAPPDATA%\\OpenAI\\Codex\\bin.",
+        "空欄では PATH と %LOCALAPPDATA%\\OpenAI\\Codex\\bin 配下の最新の codex.exe を自動検出します。",
+        "비워 두면 PATH와 %LOCALAPPDATA%\\OpenAI\\Codex\\bin 아래 최신 codex.exe를 자동으로 찾습니다.",
+    ),
+    "CodexAgentConfig.codex_home": (
+        "Leave empty to use CODEX_HOME or ~/.codex. It must be signed in, and MaiBot must run as the same OS user.",
+        "空欄では CODEX_HOME または ~/.codex を使用します。ログイン済みで、MaiBot が同じ OS ユーザーで動作している必要があります。",
+        "비워 두면 CODEX_HOME 또는 ~/.codex를 사용합니다. 로그인되어 있어야 하며 MaiBot이 같은 OS 사용자로 실행되어야 합니다.",
+    ),
+    "CodexAgentConfig.task_timeout_seconds": (
+        "Maximum run time once the task starts, excluding queue time and independent of the general image request timeout. Research and refinement often take minutes.",
+        "順番が来て Codex が動き始めてからの最大時間です。待機時間は含まず、一般の画像リクエストタイムアウトとも別です。調査と調整には数分かかることがあります。",
+        "차례가 되어 Codex가 실행된 뒤의 최대 시간입니다. 대기 시간은 포함하지 않으며 일반 이미지 요청 시간 제한과 별개입니다. 조사와 조정에 몇 분이 걸릴 수 있습니다.",
+    ),
+    "CodexAgentConfig.max_concurrent_tasks": (
+        "Maximum Codex tasks running at once for the same CODEX_HOME. Extra tasks wait in submission order.",
+        "同じ CODEX_HOME で同時に実行する Codex タスクの上限です。超えたタスクは提出順に待機します。",
+        "같은 CODEX_HOME에서 동시에 실행할 Codex 작업 수입니다. 초과한 작업은 제출 순서대로 대기합니다.",
+    ),
+    "CodexAgentConfig.max_queued_tasks": (
+        "Tasks allowed to wait when all run slots are busy. A full queue is refused before quota is charged; 0 disables queueing.",
+        "実行枠が埋まっているときに待機できるタスク数です。満杯なら利用回数を消費する前に拒否します。0 は待機なしです。",
+        "실행 슬롯이 모두 사용 중일 때 대기할 수 있는 작업 수입니다. 가득 차면 횟수를 차감하기 전에 거부하며 0이면 대기하지 않습니다.",
+    ),
+    "CodexAgentConfig.queue_timeout_seconds": (
+        "Give up after waiting this long; the request was never sent. Use a fallback model if configured, otherwise fail and refund without queueing again.",
+        "この時間待っても順番が来なければ諦めます（リクエストは未送信）。代替モデルがあれば使用し、なければ失敗として回数を返却し、再度は待機しません。",
+        "이 시간 동안 차례가 오지 않으면 포기합니다(요청은 전송되지 않음). 대체 모델이 있으면 사용하고, 없으면 실패 처리 후 횟수를 반환하며 다시 대기하지 않습니다.",
+    ),
+    "CodexAgentConfig.max_reference_downloads": (
+        "The agent fetches references only through the plugin's restricted downloader (public HTTP(S), verified images). 0 disables it.",
+        "エージェントはプラグインの制限付きダウンロードツール（公開 HTTP(S)、画像検証あり）のみで参照画像を取得します。0 で無効です。",
+        "에이전트는 플러그인의 제한된 다운로드 도구(공개 HTTP(S), 이미지 검증)로만 참조 이미지를 가져옵니다. 0이면 사용하지 않습니다.",
+    ),
+    "CodexAgentConfig.allow_proxy_fake_ip": (
+        "Proxy TUN fake-ip modes resolve domains to 198.18.0.0/15. When enabled, reference downloads allow that range; other private addresses stay blocked.",
+        "プロキシ TUN の fake-ip モードではドメインが 198.18.0.0/15 に解決されます。有効にすると参照画像の取得でこの範囲を許可し、他のプライベートアドレスは拒否します。",
+        "프록시 TUN fake-ip 모드는 도메인을 198.18.0.0/15로 해석합니다. 켜면 참조 이미지 다운로드에서 이 범위를 허용하며 다른 사설 주소는 계속 차단합니다.",
+    ),
+    "CodexAgentConfig.resume_enabled": (
+        "When an edit's source image was recently generated by this platform, continue the Codex session that produced it.",
+        "画像変換の元画像がこのプラットフォームで最近生成されたものなら、それを生成した Codex セッションを継続します。",
+        "이미지 변환의 원본이 최근 이 플랫폼에서 생성된 경우 해당 Codex 세션을 이어갑니다.",
+    ),
+    "CodexAgentConfig.thread_retention_days": (
+        "Older sessions are no longer resumed, and the plugin's stored references and inputs for them are removed.",
+        "期間を過ぎたセッションは継続せず、プラグインが保存した参照画像と入力画像を削除します。",
+        "기간이 지난 세션은 이어가지 않으며 플러그인이 저장한 참조 이미지와 입력 이미지를 삭제합니다.",
+    ),
+    "CodexAgentConfig.deliver_all_images": (
+        "Off sends only the final image chosen by the agent; on sends every image generated in the turn.",
+        "オフではエージェントが選んだ最終画像のみ、オンではこのターンで生成した全画像を送信します。",
+        "끄면 에이전트가 선택한 최종 이미지만, 켜면 이번 턴에 생성된 모든 이미지를 전송합니다.",
+    ),
+    "CodexAgentConfig.agent_instructions": (
+        "Fixed instructions added to every request. Tool and safety restrictions are enforced by the plugin regardless.",
+        "毎回のリクエストに付加する固定指示です。ツールと安全上の制限はプラグインが常に適用します。",
+        "모든 요청에 덧붙이는 고정 지침입니다. 도구와 보안 제한은 플러그인이 항상 적용합니다.",
+    ),
     "NovelAIModelConfig.models": (
         "Add official presets or enter compatible-service model IDs in this single list. Save the platform to apply changes.",
         "公式プリセットの追加と互換サービスのモデル ID の入力を同じ一覧で行います。プラットフォームを保存すると反映されます。",

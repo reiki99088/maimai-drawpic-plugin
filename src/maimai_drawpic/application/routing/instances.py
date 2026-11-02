@@ -33,6 +33,19 @@ class InstanceImageProvider:
     ) -> List[bytes]:
         return await self._call(self.provider.edit_images_with_urls, prompt, self.model, images, urls, n)
 
+    @property
+    def agent_settings(self) -> Any:
+        """智能体平台的运行设置；普通图片平台没有该属性。"""
+        return self.provider.settings
+
+    async def run_agent(self, request: Any, on_queue: Any = None) -> Any:
+        """以真实模型 ID 执行智能体任务，保留会话接续信息。"""
+        request.model = self.model
+        return await self.provider.run_agent(request, on_queue)
+
+    def queue_status(self) -> Any:
+        return self.provider.queue_status()
+
 
 @dataclass(frozen=True)
 class InstanceModelRoute:
@@ -110,6 +123,36 @@ class InstanceProviderRouter(ProviderRouter):
 
     def get_comfyui_models(self) -> List[str]:
         return self._models("comfyui")
+
+    def get_agnes_models(self) -> List[str]:
+        return self._models("agnes")
+
+    def get_codex_models(self) -> List[str]:
+        return self._models("codex")
+
+    def model_requires_admin(self, model: str) -> bool:
+        matches = self._matches(model)
+        if len(matches) != 1:
+            return False
+        return matches[0].router.model_requires_admin(matches[0].model)
+
+    def resolve_task_timeout_seconds(self, model: str = "") -> int:
+        matches = self._matches(model) if model else []
+        if len(matches) != 1:
+            return self.resolve_request_timeout_seconds()
+        return matches[0].router.resolve_task_timeout_seconds(matches[0].model)
+
+    def resolve_queue_timeout_seconds(self, model: str = "") -> int:
+        matches = self._matches(model) if model else []
+        if len(matches) != 1:
+            return 0
+        return matches[0].router.resolve_queue_timeout_seconds(matches[0].model)
+
+    def agent_queue_status(self, model: str) -> Any:
+        matches = self._matches(model)
+        if len(matches) != 1:
+            return None
+        return matches[0].router.agent_queue_status(matches[0].model)
 
     def get_model_provider(self, model: str) -> str:
         matches = self._matches(model)

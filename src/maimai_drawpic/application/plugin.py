@@ -20,6 +20,7 @@ from ..infrastructure.storage.preferences import SessionPreferenceStore
 from ..domain.styles import StylePromptResolver
 from .chat import ChatStreamService
 from ..infrastructure.storage.tasks import DrawTaskStore
+from ..infrastructure.storage.agent_threads import CodexThreadStore
 from ..infrastructure.storage.quotas import UserQuotaStore
 from ..infrastructure.storage.platforms import PLATFORM_NAMES, WorkspaceConfigStore, host_config, host_default_config
 from ..infrastructure.storage.results import ImageResultStore
@@ -50,6 +51,7 @@ class DrawpicRuntime(MaiBotPlugin):
         self._moderation_service: DrawpicModerationService | None = None
         self._task_store: DrawTaskStore
         self._usage_store: UserQuotaStore
+        self._agent_threads: CodexThreadStore | None = None
         self._image_reply_renderer = PinkImageReplyRenderer()
         self._draw_service: DrawService | None = None
         self._retired_draw_services: List[DrawService] = []
@@ -142,6 +144,24 @@ class DrawpicRuntime(MaiBotPlugin):
             path=self._data_dir / "draw_tasks.json", logger=self.ctx.logger, sanitize=self._redactor.redact
         )
         self._usage_store = UserQuotaStore(path=self._data_dir / "user_quotas.json", logger=self.ctx.logger)
+        self._agent_threads = CodexThreadStore(self._data_dir / "codex_agent", logger=self.ctx.logger)
+
+    def _load_agent_threads(self) -> None:
+        """读取 Codex 会话索引并清理过期会话目录；索引损坏只停用接续，不影响其他平台。"""
+
+        self._agent_threads.load()
+        records = self._platform_store.providers if self._platform_store is not None else []
+        # 多个 Codex 实例共用会话目录，按最长保留期清理，避免误删其他实例仍可接续的会话。
+        days = max(
+            [int(item["config"].get("thread_retention_days", 7)) for item in records if item["kind"] == "codex"] or [7]
+        )
+        try:
+            removed = self._agent_threads.prune(days)
+        except OSError as exc:
+            self.ctx.logger.warning("Codex 会话目录清理失败: error_type=%s", type(exc).__name__)
+            return
+        if removed:
+            self.ctx.logger.info("已清理过期 Codex 会话目录: count=%s", removed)
 
     def _prepare_workflows_dir(self) -> None:
         """创建 ComfyUI 工作流目录及首次使用说明，不覆盖用户内容。"""
@@ -215,6 +235,7 @@ class DrawpicRuntime(MaiBotPlugin):
                 moderation_service=self._moderation_service,
                 task_store=self._task_store,
                 result_store=self._result_store,
+                agent_threads=self._agent_threads,
             )
             self._draw_services.add(self._draw_service)
         self._platform_store.pending_model_renames.clear()
@@ -276,6 +297,7 @@ class DrawpicRuntime(MaiBotPlugin):
             await run_owned_thread(self._require_session_store().load)
             await run_owned_thread(self._task_store.load)
             await run_owned_thread(self._usage_store.load)
+            await run_owned_thread(self._load_agent_threads)
             await attach_workspace(self)
         except BaseException:
             # Runner 的 on_load 失败路径不会再调用 on_unload。只释放已创建

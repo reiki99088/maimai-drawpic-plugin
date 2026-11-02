@@ -1,8 +1,8 @@
 """对提供商返回的图片地址逐跳校验，并固定实际连接 IP。"""
 
-from ipaddress import ip_address
+from ipaddress import ip_address, ip_network
 from aiohttp.helpers import get_env_proxy_for_url
-from typing import List
+from typing import Iterable, List
 from yarl import URL
 import aiohttp
 import asyncio
@@ -31,6 +31,18 @@ def _public_address(value: str) -> bool:
     )
 
 
+# Clash / Mihomo / sing-box 等代理 TUN 的 fake-ip 地址段（RFC 2544 基准测试保留段）。
+# 仅供调用方显式允许，提供商结果下载默认不放行。
+FAKE_IP_NETWORK = ip_network("198.18.0.0/15")
+
+
+def _allowed_address(value: str, extra_networks: Iterable) -> bool:
+    if _public_address(value):
+        return True
+    address = ip_address(value)
+    return any(address.version == network.version and address in network for network in extra_networks)
+
+
 def _url(value: str) -> URL:
     try:
         url = URL(value)
@@ -55,7 +67,14 @@ async def _addresses(host: str, port: int) -> List[str]:
 
 
 @bounded_results
-async def download_image(url: str, *, base_url: str, proxy_settings: HttpProxySettings, timeout_seconds: int) -> bytes:
+async def download_image(
+    url: str,
+    *,
+    base_url: str,
+    proxy_settings: HttpProxySettings,
+    timeout_seconds: int,
+    extra_allowed_networks: tuple = (),
+) -> bytes:
     """在有限预算内只恢复同一结果地址；每次重新检查 DNS 与重定向。"""
     current_budget().available()
     try:
@@ -63,7 +82,11 @@ async def download_image(url: str, *, base_url: str, proxy_settings: HttpProxySe
             for attempt in range(3):
                 try:
                     raw = await _download_image(
-                        url, base_url=base_url, proxy_settings=proxy_settings, timeout_seconds=timeout_seconds
+                        url,
+                        base_url=base_url,
+                        proxy_settings=proxy_settings,
+                        timeout_seconds=timeout_seconds,
+                        extra_allowed_networks=extra_allowed_networks,
                     )
                     return current_budget().accept(raw)
                 except ProviderDownloadError:
@@ -75,7 +98,14 @@ async def download_image(url: str, *, base_url: str, proxy_settings: HttpProxySe
     raise AssertionError("unreachable download retry state")
 
 
-async def _download_image(url: str, *, base_url: str, proxy_settings: HttpProxySettings, timeout_seconds: int) -> bytes:
+async def _download_image(
+    url: str,
+    *,
+    base_url: str,
+    proxy_settings: HttpProxySettings,
+    timeout_seconds: int,
+    extra_allowed_networks: tuple = (),
+) -> bytes:
     """默认只访问公网；管理员配置的服务同源结果允许本地部署，无需额外开关。"""
     current, trusted = _url(url), _url(base_url)
     timeout = aiohttp.ClientTimeout(total=timeout_seconds)
@@ -86,7 +116,10 @@ async def _download_image(url: str, *, base_url: str, proxy_settings: HttpProxyS
                 for hop in range(6):
                     addresses = await _addresses(current.raw_host, current.port)
                     local_origin = current.origin() == trusted.origin()
-                    if not addresses or (not local_origin and not all(_public_address(value) for value in addresses)):
+                    if not addresses or (
+                        not local_origin
+                        and not all(_allowed_address(value, extra_allowed_networks) for value in addresses)
+                    ):
                         raise ProviderResultError("图片结果地址指向非公网网络，且不属于已配置服务的同源地址")
                     target = current.with_host(addresses[0])
                     kwargs = proxy_settings.aiohttp_request_kwargs()

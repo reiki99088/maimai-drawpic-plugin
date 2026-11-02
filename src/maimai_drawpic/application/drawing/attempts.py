@@ -25,6 +25,7 @@ class RequestAttemptRunnerMixin:
         source_image_urls: List[str],
         matched_message_id: str,
         request_negative_prompt: str,
+        restricted_models_allowed: bool = False,
     ) -> Tuple[List[bytes], Optional[ImageRequestAttempt], List[str]]:
         # 模式参数只携带调用方/会话的显式覆盖；空值由每个备选实例自行解析默认值。
         errors: List[str] = []
@@ -49,6 +50,18 @@ class RequestAttemptRunnerMixin:
             if attempt is None or attempt.model in seen:
                 continue
             seen.add(attempt.model)
+            requires_admin = getattr(self.router, "model_requires_admin", None)
+            if not restricted_models_allowed and requires_admin is not None and requires_admin(attempt.model):
+                # 使用范围限定管理员的平台不能经备选链路绕过权限。
+                errors.append(self._format_attempt_error(attempt, "该模型仅限插件管理员使用，已跳过"))
+                self.ctx.logger.warning(
+                    "跳过仅限管理员的模型: task_id=%s task_type=%s provider=%s model=%s",
+                    task_id,
+                    task_type,
+                    attempt.provider_name,
+                    attempt.model,
+                )
+                continue
             try:
                 self.router.validate_source_image_count(attempt.model, len(source_image_bytes_list))
             except ValueError as exc:

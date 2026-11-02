@@ -106,7 +106,7 @@
       `<p class="muted" style="margin-bottom:20px">所有类型都可以添加多个实例。请使用不同名称，区分账号、服务或工作流。</p><div class="catalog-grid">${state.data.catalog
         .map((item) => {
           const added = false;
-          return `<button class="catalog-option" data-kind="${e(item.kind)}" ${added ? "disabled" : ""}><span class="provider-icon">${e(item.name.slice(0, 1))}</span><span>${e(item.name)}<small>${added ? "已添加，可在平台卡片中编辑" : item.kind === "openai" ? "OpenAI、New API 与其他兼容服务" : "添加并配置模型"}</small></span></button>`;
+          return `<button class="catalog-option" data-kind="${e(item.kind)}" ${added ? "disabled" : ""}><span class="provider-icon">${e(item.name.slice(0, 1))}</span><span>${e(item.name)}<small>${added ? "已添加，可在平台卡片中编辑" : item.kind === "openai" ? "OpenAI、New API 与其他兼容服务" : item.kind === "codex" ? "本机 Codex 自主检索参考并生图" : "添加并配置模型"}</small></span></button>`;
         })
         .join("")}</div>`,
     );
@@ -134,7 +134,7 @@
             .map((model) => `<span class="pill">${e(model)}</span>`)
             .join(
               "",
-            )}${models.length > 4 ? `<span class="pill">+${models.length - 4}</span>` : ""}</div><p class="hint">${item.kind === "comfyui" ? "从标准数据目录加载工作流" : item.has_api_key ? "密钥已配置，页面不回传明文" : "尚未填写 API Key"}</p><div class="actions"><button class="button secondary compact" data-edit>编辑配置</button><button class="button ghost compact" data-delete>移除</button></div></article>`;
+            )}${models.length > 4 ? `<span class="pill">+${models.length - 4}</span>` : ""}</div><p class="hint">${item.kind === "comfyui" ? "从标准数据目录加载工作流" : item.kind === "codex" ? `使用本机 Codex 登录状态 · ${item.config.access_scope === "all" ? "所有用户可用" : "仅管理员可用"}` : item.has_api_key ? "密钥已配置，页面不回传明文" : "尚未填写 API Key"}</p><div class="actions"><button class="button secondary compact" data-edit>编辑配置</button><button class="button ghost compact" data-delete>移除</button></div></article>`;
         })
         .join(
           "",

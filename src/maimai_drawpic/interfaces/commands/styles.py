@@ -63,6 +63,7 @@ class StyleCommandMixin:
                 group_id=group_id,
                 platform_name=platform,
                 notify_start=True,
+                announce_queue=True,
             )
         except Exception as exc:
             self.ctx.logger.error("/绘图 风格命令启动失败: %s", exc, exc_info=True)

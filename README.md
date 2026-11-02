@@ -90,6 +90,7 @@ git clone https://github.com/WhiteCloudOL/maimai-drawpic-plugin.git
 | NovelAI / NovelAPI | 支持 | 图生图仅一张源图 |
 | Agnes AI | 支持 | Image 2.0 使用像素尺寸；2.1 / 2.5 另支持 1K～4K 与宽高比 |
 | ComfyUI | 依工作流支持 | 必须使用 API 格式工作流 |
+| Codex 智能体（ChatGPT） | 支持，最多 4 张源图 | 需本机已登录 Codex；自主检索参考图后生图，二次调整接续原会话；默认仅管理员可用 |
 
 所有平台都可添加多个命名实例；未添加的平台不启用。插件只处理图片，不会静默丢弃源图或改用另一种任务类型。[各平台最小配置与限制](docs/platforms.md)。
 

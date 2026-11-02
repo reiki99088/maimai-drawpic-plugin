@@ -3,7 +3,7 @@
 from typing import Any, Dict, Optional
 import asyncio
 
-from ..domain.task_errors import TaskRequestError
+from ..domain.task_errors import ModelAccessError, TaskRequestError
 from .drawing.admission import wait_for_admission
 
 
@@ -29,8 +29,14 @@ class RequestMixin:
         notify_start: bool = True,
         defer_prompt_review: bool = False,
         submission: Optional[Dict[str, Any]] = None,
+        restricted_models_allowed: Optional[bool] = None,
+        announce_queue: bool = False,
     ) -> dict[str, Any]:
-        """按当前会话设置启动后台绘图，源图为空时文生图，存在源图时图生图。"""
+        """按当前会话设置启动后台绘图，源图为空时文生图，存在源图时图生图。
+
+        restricted_models_allowed 为 None 时按请求用户的插件权限判断（与模型、次数管理相同的权限规则）；
+        工作台等已鉴权入口可显式传入 True。
+        """
 
         draw_service = self._require_draw_service()
         with draw_service.submission_scope():
@@ -76,6 +82,25 @@ class RequestMixin:
             provider_name = draw_service.router.get_model_provider(resolved_model)
             if not provider_name:
                 raise ValueError(f"指定模型不可用：{resolved_model}")
+            if restricted_models_allowed is None:
+                can_manage = getattr(self, "_can_manage_session", None)
+                restricted_allowed = bool(can_manage(resolved_user_id)) if can_manage is not None else False
+            else:
+                restricted_allowed = restricted_models_allowed
+            requires_admin = getattr(draw_service.router, "model_requires_admin", None)
+            if not restricted_allowed and requires_admin is not None and requires_admin(resolved_model):
+                # 在审核与额度预留前拒绝，避免扣次数。
+                self.ctx.logger.info(
+                    "拒绝非管理员使用受限模型: model=%s provider=%s user_id=%s group_id=%s",
+                    resolved_model,
+                    provider_name,
+                    resolved_user_id,
+                    resolved_group_id,
+                )
+                raise ModelAccessError(f"模型 {resolved_model} 仅限插件管理员使用，请切换到其他模型")
+            # 智能体平台队列已满时在审核与扣次数前拒绝；未满时记录排队位置用于回复。
+            ensure_capacity = getattr(draw_service.router, "ensure_agent_capacity", None)
+            queue_status = ensure_capacity(resolved_model) if ensure_capacity is not None else None
             task_type = "edit_image" if normalized_source_images else "draw"
             # 火山引擎使用统一模型列表，按模型名能力标记和全局黑名单提前校验。
             check_model = resolved_model
@@ -171,7 +196,7 @@ class RequestMixin:
                     await settle_quota(self._commit_draw_quota, reservation)
 
             try:
-                return await draw_service.start_background_image_request(
+                result = await draw_service.start_background_image_request(
                     prompt=prompt,
                     stream_id=resolved_stream_id,
                     resolved_model=resolved_model,
@@ -191,7 +216,35 @@ class RequestMixin:
                     on_task_unsuccessful=_handle_task_unsuccessful,
                     on_task_successful=_handle_task_successful,
                     submission=submission,
+                    restricted_models_allowed=restricted_allowed,
                 )
             except (Exception, asyncio.CancelledError):
                 await refund(reservation)
                 raise
+        ahead = queue_status.ahead if queue_status is not None else 0
+        if ahead > 0:
+            result["queue_ahead"] = ahead
+            result["message"] = (
+                f"{result['message']}Codex 智能体正忙，本任务已排队，前面还有 {ahead} 个任务，"
+                "轮到后才开始创作，完成后会自动发送；请告诉用户需要耐心等待。"
+            )
+            if announce_queue:
+                await self._announce_queue(
+                    draw_service, ahead, resolved_stream_id, resolved_user_id, resolved_group_id, resolved_platform
+                )
+        return result
+
+    async def _announce_queue(
+        self, draw_service: Any, ahead: int, stream_id: str, user_id: str, group_id: str, platform: str
+    ) -> None:
+        """聊天命令提交后告知排队位置；发送失败只记录日志，不影响已受理的任务。"""
+        try:
+            await draw_service.send_text_with_fallback(
+                f"Codex 智能体正忙，你的绘图任务已排队（前面还有 {ahead} 个），轮到后开始创作，完成后会自动发送。",
+                stream_id,
+                user_id,
+                group_id,
+                platform,
+            )
+        except Exception as exc:
+            self.ctx.logger.warning("排队提示发送失败: stream_id=%s error_type=%s", stream_id, type(exc).__name__)

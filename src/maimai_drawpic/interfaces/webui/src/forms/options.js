@@ -33,6 +33,11 @@
     once: "一次性，不重置",
     base64: "直接传入图片数据",
     image_url: "使用原图链接",
+    default: "使用 Codex 默认",
+    xhigh: "很高",
+    ultra: "极高",
+    admin: "仅插件管理员",
+    all: "所有用户",
   };
   const presets = {
     openai: {

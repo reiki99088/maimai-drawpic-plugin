@@ -36,6 +36,10 @@ modules_to_check = [
     "src.maimai_drawpic.infrastructure.providers.siliconflow",
     "src.maimai_drawpic.infrastructure.providers.volcengine",
     "src.maimai_drawpic.infrastructure.providers.zhipu",
+    "src.maimai_drawpic.infrastructure.providers.codex",
+    "src.maimai_drawpic.infrastructure.providers.codex_references",
+    "src.maimai_drawpic.infrastructure.storage.agent_threads",
+    "src.maimai_drawpic.domain.models.codex_profiles",
 ]
 
 

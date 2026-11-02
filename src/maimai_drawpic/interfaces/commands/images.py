@@ -7,6 +7,7 @@ import asyncio
 import re
 
 from ..chat.message_images import SourceImageInput, collect_command_source_image_inputs, decode_image_base64
+from ...domain.task_errors import ModelAccessError
 
 
 class ImageCommandMixin:
@@ -158,7 +159,18 @@ class ImageCommandMixin:
                 group_id=group_id,
                 platform_name=platform,
                 notify_start=True,
+                announce_queue=True,
             )
+        except ModelAccessError as exc:
+            await self._send_command_reply(
+                title="无权使用该模型",
+                body=outward_error(self, exc),
+                stream_id=stream_id,
+                user_id=user_id,
+                group_id=group_id,
+                platform=platform,
+            )
+            return False, "无权使用该模型", 1
         except PermissionError as exc:
             await self._send_command_reply(
                 title="绘图次数不足",

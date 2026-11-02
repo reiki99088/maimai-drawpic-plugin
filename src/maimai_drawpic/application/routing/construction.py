@@ -1,6 +1,7 @@
 from ...paths import PLUGIN_DIR
 from ...infrastructure.providers.aliyun import AliyunImage
 from ...infrastructure.providers.agnes import AgnesImage
+from ...infrastructure.providers.codex import CodexAgentImage, CodexAgentSettings
 from ...infrastructure.providers.comfyui import ComfyUIImage
 from ...infrastructure.providers.gemini import GoogleImage
 from ...infrastructure.providers.novelai import NovelAIImage
@@ -31,6 +32,33 @@ class ProviderConstructionMixin:
             model_size_overrides=parse_model_value_overrides(config.model_size_overrides),
             extra_parameters=parse_key_value_options(config.extra_parameters),
             proxy_settings=self._get_proxy_settings("agnes"),
+        )
+
+    def create_codex_provider(self) -> CodexAgentImage:
+        """按实例配置构造 Codex 智能体适配器；会话目录位于插件标准数据目录。"""
+        if self.data_dir is None:
+            raise RuntimeError("创建 Codex 智能体提供商前必须注入插件标准数据目录")
+        config = self.config.codex
+        settings = CodexAgentSettings(
+            codex_path=config.codex_path,
+            codex_home=config.codex_home,
+            reasoning_effort=config.reasoning_effort,
+            task_timeout_seconds=config.task_timeout_seconds,
+            max_concurrent_tasks=config.max_concurrent_tasks,
+            max_queued_tasks=config.max_queued_tasks,
+            queue_timeout_seconds=config.queue_timeout_seconds,
+            max_reference_downloads=config.max_reference_downloads,
+            allow_proxy_fake_ip=config.allow_proxy_fake_ip,
+            resume_enabled=config.resume_enabled,
+            thread_retention_days=config.thread_retention_days,
+            deliver_all_images=config.deliver_all_images,
+            agent_instructions=config.agent_instructions,
+        )
+        return CodexAgentImage(
+            settings,
+            work_root=self.data_dir / "codex_agent",
+            proxy_settings=self._get_proxy_settings("codex"),
+            logger=self.logger,
         )
 
     def _get_proxy_settings(self, provider_name: ProviderName) -> HttpProxySettings:
@@ -341,6 +369,8 @@ class ProviderConstructionMixin:
             provider = self.create_comfyui_provider(normalized_negative_prompt)
         elif provider_type == "agnes":
             provider = self.create_agnes_provider()
+        elif provider_type == "codex":
+            provider = self.create_codex_provider()
         elif provider_type == "openai":
             provider = self.create_openai_provider(
                 self.resolve_openai_compatibility_mode(openai_compatibility_mode, model),

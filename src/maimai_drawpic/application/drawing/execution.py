@@ -32,6 +32,7 @@ class ImageExecutionMixin:
         prompt_reviewed: bool = True,
         on_task_unsuccessful: Callable[[str, str, str], Awaitable[None] | None] | None = None,
         on_task_successful: Callable[[str, str, str], Awaitable[None] | None] | None = None,
+        restricted_models_allowed: bool = False,
     ) -> None:
         """后台执行绘图任务，源图为空时文生图，存在源图时图生图。"""
 
@@ -135,6 +136,7 @@ class ImageExecutionMixin:
                 source_image_urls=normalized_source_urls,
                 matched_message_id=matched_message_id,
                 request_negative_prompt=request_negative_prompt,
+                restricted_models_allowed=restricted_models_allowed,
             )
 
             if successful_attempt is None:

@@ -9,13 +9,14 @@ from ...infrastructure.storage.results import ImageResultStore
 from ..routing import ProviderRouter
 from ..chat import ChatStreamService
 from ...infrastructure.storage.tasks import DrawTaskStore
+from ...infrastructure.storage.agent_threads import CodexThreadStore
 from .attempts import RequestAttemptRunnerMixin
 from .prompts import PromptReviewMixin
 from .planning import RequestPlanningMixin
 from .execution import ImageExecutionMixin
 from .queries import TaskQueryMixin
 from .admission import persist_submission, tracked_submission, wait_for_admission
-from ...domain.task_errors import task_error
+from ...domain.task_errors import ModelAccessError, task_error
 
 
 class DrawService(
@@ -108,6 +109,7 @@ class DrawService(
         moderation_service: DrawpicModerationService,
         task_store: DrawTaskStore,
         result_store: ImageResultStore | None = None,
+        agent_threads: CodexThreadStore | None = None,
     ) -> None:
         self.ctx = ctx
         self.router = router
@@ -115,6 +117,7 @@ class DrawService(
         self.moderation_service = moderation_service
         self.task_store = task_store
         self.result_store = result_store
+        self.agent_threads = agent_threads
         self.background_tasks: set[asyncio.Task[Any]] = set()
         self._submissions: dict[asyncio.Task[Any], int] = {}
         self._started_task_ids: set[str] = set()
@@ -287,9 +290,24 @@ class DrawService(
         on_task_unsuccessful: Callable[[str, str, str], Awaitable[None] | None] | None = None,
         on_task_successful: Callable[[str, str, str], Awaitable[None] | None] | None = None,
         submission: Optional[Dict[str, Any]] = None,
+        restricted_models_allowed: bool = False,
     ) -> dict[str, Any]:
-        """启动后台绘图任务，源图为空时文生图，存在源图时图生图。"""
+        """启动后台绘图任务，源图为空时文生图，存在源图时图生图。
 
+        restricted_models_allowed 表示调用方已确认请求者可使用仅限管理员的平台（如 Codex 智能体）。
+        """
+
+        requires_admin = getattr(self.router, "model_requires_admin", None)
+        if not restricted_models_allowed and requires_admin is not None and requires_admin(resolved_model):
+            self.ctx.logger.info(
+                "拒绝提交仅限管理员的模型任务: model=%s stream_id=%s user_id=%s group_id=%s platform=%s",
+                resolved_model,
+                stream_id,
+                user_id,
+                group_id,
+                platform_name,
+            )
+            raise ModelAccessError(f"模型 {resolved_model} 仅限插件管理员使用")
         normalized_source_images = source_image_bytes_list or []
         normalized_source_urls = source_image_urls or [""] * len(normalized_source_images)
         if len(normalized_source_urls) != len(normalized_source_images):
@@ -369,6 +387,7 @@ class DrawService(
                 platform_name=platform_name,
                 on_task_unsuccessful=on_task_unsuccessful,
                 on_task_successful=on_task_successful,
+                restricted_models_allowed=restricted_models_allowed,
             ),
             name=f"maimai-drawpic:{task_record.task_id}",
         )
@@ -401,7 +420,11 @@ class DrawService(
             "fallback_model": fallback_model,
             "fallback_models": fallback_models,
             "task_type": task_type,
-            "timeout_seconds": self.resolve_request_timeout_seconds(),
+            "timeout_seconds": (
+                self.router.resolve_task_timeout_seconds(primary_attempt.model)
+                if hasattr(self.router, "resolve_task_timeout_seconds")
+                else self.resolve_request_timeout_seconds()
+            ),
             "task_id": task_record.task_id,
         }
         if is_image_edit:

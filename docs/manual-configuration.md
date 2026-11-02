@@ -64,7 +64,8 @@
 
 - `providers` 是平台实例列表；同一种 `kind` 可以出现多次，但名称须不区分大小写唯一，支持中英文且不能含空格。最多 40 个实例。
 - `id` 是 32 位小写十六进制字符串。已有实例不要改；新建实例优先通过工作台生成 ID，再在文件中编辑。
-- `kind` 支持 `openai`、`agnes`、`google`、`zhipu`、`aliyun`、`volcengine`、`siliconflow`、`novelai`、`comfyui`。
+- `kind` 支持 `openai`、`agnes`、`google`、`zhipu`、`aliyun`、`volcengine`、`siliconflow`、`novelai`、`comfyui`、`codex`。
+- `codex` 实例没有 API Key，常用字段示例：`{"enabled": true, "access_scope": "admin", "models": ["gpt-6.1-sol"], "reasoning_effort": "medium", "codex_path": "", "codex_home": "", "task_timeout_seconds": 900, "max_concurrent_tasks": 1, "max_queued_tasks": 3, "queue_timeout_seconds": 1200, "max_reference_downloads": 8, "allow_proxy_fake_ip": true, "resume_enabled": true, "thread_retention_days": 7, "deliver_all_images": false}`。`access_scope` 只能是 `admin` 或 `all`；会话索引与参考图保存在标准数据目录的 `codex_agent/` 下，不要手动编辑其中的 `threads.json`。
 - `config` 是该平台类型的字段，不能把另一种平台的参数混入。省略的已知字段会使用该平台默认值；已有文件通常已写出完整字段。
 - 模型列表仅填写真实模型 ID，不再使用 `别名=模型ID`；分辨率覆盖也使用真实模型 ID。
 - NovelAI 同样只维护一个 `models` 列表，可混合官方预设与兼容服务自定义 ID；旧 `custom_models` 加载时合并去重，保存后移除此旧字段。

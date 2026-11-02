@@ -83,6 +83,10 @@ class _StubConfig:
         enabled = False
         models = []
 
+    class codex:
+        enabled = False
+        models = []
+
     volcengine = _StubVolcConfig()
     general = _StubGeneralConfig()
 

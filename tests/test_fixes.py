@@ -456,7 +456,7 @@ def test_style_descriptions_are_structured_and_backward_compatible() -> None:
 
     legacy_preset = StylePresetConfig(name="旧风格")
     assert legacy_preset.description == ""
-    assert DrawpicConfig().plugin.config_version == "2.39.0"
+    assert DrawpicConfig().plugin.config_version == "2.40.0"
 
     resolver = StylePromptResolver(
         StyleConfig(
@@ -1219,6 +1219,10 @@ def test_provider_router_fallback_model_resolution() -> None:
 
     class _StubConfig:
         class agnes:
+            enabled = False
+            models = []
+
+        class codex:
             enabled = False
             models = []
 

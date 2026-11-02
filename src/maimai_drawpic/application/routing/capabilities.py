@@ -1,11 +1,13 @@
-from typing import Literal
+from typing import Any, Literal
 import re
 
+from ...domain.task_errors import TaskRequestError
 from ...domain.models.aliyun_profiles import (
     resolve_aliyun_image_input_mode,
     resolve_aliyun_model_profile,
     supports_aliyun_negative_prompt,
 )
+from ...domain.models.codex_profiles import MAX_CODEX_SOURCE_IMAGES
 from ...domain.models.rinkoai_profiles import RINKOAI_EDIT_UNSUPPORTED_REASON, is_rinkoai_nai_model
 from ...infrastructure.providers.gemini import GoogleImage
 from ...infrastructure.providers.siliconflow import SiliconFlowImage
@@ -236,7 +238,48 @@ class TaskCapabilityMixin:
             maximum = resolve_aliyun_model_profile(model).max_input_images
         elif provider == "volcengine":
             maximum = VolcengineImage._max_reference_images(VolcengineImage._resolve_model_family(model))
+        elif provider == "codex":
+            maximum = MAX_CODEX_SOURCE_IMAGES
         return maximum
+
+    def model_requires_admin(self, model: str) -> bool:
+        """使用范围限定为管理员的平台模型（目前为 Codex 智能体）。"""
+
+        return self.get_model_provider(model) == "codex" and self.config.codex.access_scope == "admin"
+
+    def resolve_task_timeout_seconds(self, model: str = "") -> int:
+        """智能体平台使用自身的任务超时，其余平台沿用通用图片请求超时。"""
+
+        if model and self.get_model_provider(model) == "codex":
+            return int(self.config.codex.task_timeout_seconds)
+        return self.resolve_request_timeout_seconds()
+
+    def resolve_queue_timeout_seconds(self, model: str = "") -> int:
+        """本地排队等待上限；没有本地队列的平台为 0。"""
+
+        if model and self.get_model_provider(model) == "codex":
+            return int(self.config.codex.queue_timeout_seconds)
+        return 0
+
+    def agent_queue_status(self, model: str) -> Any:
+        """返回智能体平台的队列快照；普通图片平台返回 None。"""
+
+        if self.get_model_provider(model) != "codex":
+            return None
+        provider, _ = self.require_platform_for_model(model)
+        return provider.queue_status()
+
+    def ensure_agent_capacity(self, model: str) -> Any:
+        """队列已满时在扣次数前拒绝；返回快照供提交回复说明排队位置。"""
+
+        status = self.agent_queue_status(model)
+        if status is not None and status.busy:
+            raise TaskRequestError(
+                "CONCURRENCY_LIMIT",
+                f"Codex 智能体正忙：{status.running} 个任务运行中、{status.waiting} 个排队，已达上限，请稍后再试",
+                retry_submit=True,
+            )
+        return status
 
     def resolve_volcengine_model_for_task(
         self,
