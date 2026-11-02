@@ -30,7 +30,7 @@
     daily: "每天",
     weekly: "每周",
     monthly: "每月",
-    once: "一次性，不重置",
+    once: "一次性",
     base64: "直接传入图片数据",
     image_url: "使用原图链接",
     default: "使用 Codex 默认",
@@ -40,6 +40,9 @@
     all: "所有用户",
     source: "跟随第一张源图比例",
     configured: "使用默认分辨率",
+    replyer: "回复任务组",
+    planner: "规划任务组",
+    vlm: "视觉任务组",
   };
   const presets = {
     openai: {
@@ -94,6 +97,7 @@
   };
   function label(value) {
     if (value === "") return labels[""];
+    if (["daily", "weekly", "monthly", "once"].includes(value)) return labels[value];
     if (Object.hasOwn(labels, value)) return `${labels[value]} · ${value}`;
     const size = String(value).match(/^(\d+)[x*](\d+)$/);
     if (size)
