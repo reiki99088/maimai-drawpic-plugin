@@ -2,7 +2,7 @@
 
 from maibot_sdk import Field, PluginConfigBase
 from pydantic import field_validator
-from typing import Any
+from typing import Any, Literal
 
 from ...models.openai_profiles import OpenAICompatibilityMode, normalize_openai_mode
 
@@ -79,6 +79,16 @@ class OpenAICompatibleInstanceConfig(PluginConfigBase):
             "label": "默认分辨率",
             "placeholder": "1024x1024",
             "order": 6,
+        },
+    )
+    edit_size_mode: str = Field(
+        default="source",
+        description="图生图请求尺寸来源：source 跟随第一张源图比例，configured 使用默认分辨率（含按模型覆盖）",
+        json_schema_extra={
+            "label": "图生图尺寸",
+            "placeholder": "source / configured",
+            "hint": "source 按第一张源图比例出图；configured 始终使用默认分辨率，适合参考图比例与目标画布不同的场景",
+            "order": 6.5,
         },
     )
     rewrite_prompt_to_english: bool = Field(
@@ -243,6 +253,15 @@ class OpenAIModelConfig(PluginConfigBase):
             "label": "默认分辨率",
             "hint": "常见值：1024x1024、1024x1536、1536x1024、auto；OpenAI 兼容中转可按自身要求填写",
             "order": 4,
+        },
+    )
+    edit_size_mode: Literal["source", "configured"] = Field(
+        default="source",
+        description="图生图请求尺寸来源。",
+        json_schema_extra={
+            "label": "图生图尺寸",
+            "hint": "source：按第一张源图比例出图（默认）；configured：始终使用上方默认分辨率或按模型覆盖的尺寸，适合参考图比例与目标画布不同的场景，例如带角色参考图的竖版漫画。",
+            "order": 4.5,
         },
     )
     model_size_overrides: list[str] = Field(

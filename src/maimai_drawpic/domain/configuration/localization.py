@@ -175,6 +175,7 @@ _FIELD_LABELS: Dict[str, Tuple[str, str, str]] = {
         "기본 OpenAI 호환 모드",
     ),
     "default_size": ("Default Resolution", "既定の解像度", "기본 해상도"),
+    "edit_size_mode": ("Image Edit Size", "画像編集のサイズ", "이미지 편집 크기"),
     "default_style": ("Default Style", "既定スタイル", "기본 스타일"),
     "description": ("Description", "説明", "설명"),
     "enabled": ("Enabled", "有効", "활성화"),
@@ -459,6 +460,21 @@ _OPENAI_MODE_HINTS = (
 
 
 _FIELD_HINT_OVERRIDES: Dict[str, Tuple[str, str, str]] = {
+    "OpenAIModelConfig.edit_size_mode": (
+        "source: follow the aspect ratio of the first source image (default). configured: always use the default "
+        "resolution or per-model override above; useful when reference images differ from the target canvas, "
+        "such as portrait comics drawn with character references.",
+        "source：1 枚目のソース画像の縦横比に従います（既定）。configured：常に上の既定の解像度またはモデル別上書きを使います。"
+        "キャラクター参照画像付きの縦長漫画など、参照画像と目標キャンバスの比率が異なる場合に使います。",
+        "source: 첫 번째 원본 이미지의 비율을 따릅니다(기본값). configured: 항상 위의 기본 해상도 또는 모델별 재정의를 사용합니다. "
+        "캐릭터 참조 이미지를 쓰는 세로 만화처럼 참조 이미지와 목표 캔버스 비율이 다를 때 사용합니다.",
+    ),
+    "OpenAICompatibleInstanceConfig.edit_size_mode": (
+        "source follows the first source image's aspect ratio; configured always uses the default resolution, "
+        "useful when reference images differ from the target canvas.",
+        "source は 1 枚目のソース画像の比率に従い、configured は常に既定の解像度を使います。参照画像と目標キャンバスの比率が異なる場合に使います。",
+        "source는 첫 번째 원본 이미지 비율을 따르고, configured는 항상 기본 해상도를 사용합니다. 참조 이미지와 목표 캔버스 비율이 다를 때 사용합니다.",
+    ),
     "CodexAgentConfig.access_scope": (
         "admin follows the general permission setting: only plugin administrators may use it (everyone when command "
         "permissions are disabled). all allows every user. The agent browses the web and consumes Codex quota.",

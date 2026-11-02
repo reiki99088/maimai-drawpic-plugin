@@ -456,7 +456,7 @@ def test_style_descriptions_are_structured_and_backward_compatible() -> None:
 
     legacy_preset = StylePresetConfig(name="旧风格")
     assert legacy_preset.description == ""
-    assert DrawpicConfig().plugin.config_version == "2.40.0"
+    assert DrawpicConfig().plugin.config_version == "2.41.0"
 
     resolver = StylePromptResolver(
         StyleConfig(
@@ -1166,6 +1166,7 @@ def test_provider_router_openai_routes_cache() -> None:
             max_images = 1
             extra_parameters: list[str] = []
             rewrite_prompt_to_english = False
+            edit_size_mode = "source"
             instances: list = []
 
         class aliyun:
@@ -1242,6 +1243,7 @@ def test_provider_router_fallback_model_resolution() -> None:
             max_images = 1
             extra_parameters: list[str] = []
             rewrite_prompt_to_english = False
+            edit_size_mode = "source"
             instances: list = []
 
         class aliyun:

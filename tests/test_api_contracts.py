@@ -120,6 +120,42 @@ def test_openai_edit_keeps_moderation_and_serializes_json_values() -> None:
     assert provider.fields["custom_bool"] == "false"
 
 
+@pytest.mark.parametrize(("mode", "overrides", "expected"), [
+    ("source", {}, "1536x1024"),
+    ("configured", {}, "1024x1536"),
+    ("configured", {"gpt-image-2": "1024x1024"}, "1024x1024"),
+])
+def test_openai_edit_size_mode_selects_request_size(mode: str, overrides: Dict[str, str], expected: str) -> None:
+    class Provider(OpenaiImage):
+        sizes: List[str]
+
+        async def _post_form(self, url, form):
+            del url
+            self.sizes.append(next(field[2] for field in form._fields if field[0]["name"] == "size"))
+            return {"data": []}
+
+    buffer = BytesIO()
+    Image.new("RGB", (1536, 1024), "white").save(buffer, "PNG")
+    provider = Provider(
+        api_key="test", default_size="1024x1536", model_size_overrides=overrides, edit_size_mode=mode,
+    )
+    provider.sizes = []
+    asyncio.run(provider._post_edit_form_with_fallback(
+        url="https://example/v1/images/edits", model="gpt-image-2", prompt="edit",
+        image_bytes_list=[buffer.getvalue()], n=1,
+    ))
+    assert provider.sizes == [expected]
+
+
+def test_openai_edit_size_mode_reaches_provider_from_config() -> None:
+    config = DrawpicConfig()
+    config.openai.models = ["gpt-image-2"]
+    config.openai.edit_size_mode = "configured"
+    routed = ProviderRouter(config).create_openai_provider("images_api", "gpt-image-2")
+    assert routed.provider.edit_size_mode == "configured"
+    assert DrawpicConfig().openai.edit_size_mode == "source"
+
+
 def test_siliconflow_removes_retired_parameters_and_uses_model_guidance() -> None:
     provider = SiliconFlowImage(api_key="test", cfg=4, extra_parameters={
         "batch_size": 3, "output_format": "png", "cfg": 4, "model": "wrong-model",

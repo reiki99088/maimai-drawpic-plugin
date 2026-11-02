@@ -136,6 +136,7 @@ class ProviderConstructionMixin:
                 max_images=self.config.openai.max_images,
                 extra_parameters=parse_key_value_options(self.config.openai.extra_parameters),
                 rewrite_prompt_to_english=self.config.openai.rewrite_prompt_to_english,
+                edit_size_mode=self.config.openai.edit_size_mode,
             )
 
         provider = OpenaiImage(
@@ -146,6 +147,7 @@ class ProviderConstructionMixin:
             request_timeout_seconds=self.resolve_request_timeout_seconds(),
             default_size=route.default_size,
             model_size_overrides=route.model_size_overrides,
+            edit_size_mode=route.edit_size_mode,
             quality=route.quality,
             response_format=route.response_format,
             output_format=route.output_format,

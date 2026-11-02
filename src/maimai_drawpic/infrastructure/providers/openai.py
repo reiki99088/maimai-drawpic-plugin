@@ -70,6 +70,7 @@ class OpenaiImage:
         request_timeout_seconds: int = 20,
         default_size: str = "1024x1024",
         model_size_overrides: dict[str, str] | None = None,
+        edit_size_mode: str = "source",
         quality: str = "",
         response_format: str = "",
         output_format: str = "",
@@ -90,6 +91,8 @@ class OpenaiImage:
             for model, size in (model_size_overrides or {}).items()
             if str(model).strip() and str(size).strip()
         }
+        # configured：图生图不再按源图比例推断尺寸，只用默认分辨率（含按模型覆盖）。
+        self.edit_size_mode = "configured" if str(edit_size_mode).strip().lower() == "configured" else "source"
         self.quality = quality.strip()
         self.response_format = response_format.strip()
         self.output_format = output_format.strip()
@@ -607,15 +610,20 @@ class OpenaiImage:
         """
 
         default_size = self._resolve_size(model)
-        source_size = self._resolve_source_edit_size(model, image_bytes_list[0])
+        source_size = (
+            ""
+            if self.edit_size_mode == "configured"
+            else self._resolve_source_edit_size(model, image_bytes_list[0])
+        )
         size_candidates = [source_size, default_size] if source_size and source_size != default_size else [default_size]
 
         last_error = None
         for size_index, size in enumerate(size_candidates):
             if size_index == 0:
                 self._log_info(
-                    "OpenAI 图生图尺寸尝试: model=%s source_size=%s request_size=%s default_size=%s image_count=%s",
+                    "OpenAI 图生图尺寸尝试: model=%s edit_size_mode=%s source_size=%s request_size=%s default_size=%s image_count=%s",
                     model,
+                    self.edit_size_mode,
                     source_size,
                     size,
                     default_size,

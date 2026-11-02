@@ -40,6 +40,7 @@ class OpenAIModelRoute:
     max_images: int
     extra_parameters: dict[str, Any]
     rewrite_prompt_to_english: bool
+    edit_size_mode: str = "source"
 
 
 class ImageProvider(Protocol):

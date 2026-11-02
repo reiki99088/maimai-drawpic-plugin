@@ -38,6 +38,8 @@
     ultra: "极高",
     admin: "仅插件管理员",
     all: "所有用户",
+    source: "跟随第一张源图比例",
+    configured: "使用默认分辨率",
   };
   const presets = {
     openai: {
