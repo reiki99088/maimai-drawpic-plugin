@@ -1537,6 +1537,13 @@ dialog::backdrop {
   width: auto;
   accent-color: var(--accent);
 }
+/* 表单里的开关行：压过 .field > label 的 block 和上面的 width:auto，否则开关塌成一条、圆点盖住文字。 */
+.field > .inline-choice {
+  display: flex;
+}
+.inline-choice .toggle {
+  width: 36px;
+}
 .model-picker-results {
   display: flex;
   flex-direction: column;
