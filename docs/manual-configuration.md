@@ -187,7 +187,7 @@
 
 固定图源找不到参考图时，用这些服务网搜候选图：先按尺寸、比例与站点过滤（不收 Pinterest 等转存图床），下载缩略图交给 `world_knowledge_verify_model` 挑出真正对应的一张，挑不出就不用图。没填任何密钥时不网搜。
 
-- `order`：参与的服务及先后，可选 `openai`、`brave`、`tavily`，默认三者都列；没填密钥的自动跳过。
+- `order`：参与的服务及先后，可选 `openai`、`tavily`、`brave`，默认 `["openai", "tavily", "brave"]`（实测中文角色、战队、产品 OpenAI 最准，Tavily 次之，Brave 多为新闻配图和周边）；没填密钥的自动跳过。
 - `strategy`：`ordered`（默认）每次从第一个开始，失败或挑不出图才换下一个；`round_robin` 每次换一个起点轮流使用，均摊额度。每个对象最多试 2 个服务。
 - `max_candidates`：交给模型挑选的候选张数，默认 8，范围 2～12。
 - `openai_api_key`、`openai_base_url`（默认 `https://api.openai.com/v1`）、`openai_model`：OpenAI Responses API 的 `web_search` 工具，需要能返回图片结果的模型；中转服务必须支持该工具。每次产生搜索工具费与少量 token 费。
@@ -196,7 +196,7 @@
 
 ```toml
 [world_search]
-order = ["brave", "tavily", "openai"]
+order = ["openai", "tavily", "brave"]
 strategy = "round_robin"
 brave_api_key = "<Brave 密钥>"
 tavily_api_key = "<Tavily 密钥>"

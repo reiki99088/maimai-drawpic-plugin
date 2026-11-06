@@ -161,6 +161,7 @@ def test_request_errors_are_classified_without_secrets(tmp_path) -> None:
 
 def test_only_keyed_providers_are_built() -> None:
     config = DrawpicConfig().world_search
+    assert config.order == ["openai", "tavily", "brave"] and config.strategy == "ordered"
     assert search_module.build_image_search_clients(config, PROXY) == {}
     config.brave_api_key = "b"
     config.openai_api_key = "o"

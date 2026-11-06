@@ -15,11 +15,12 @@ class WorldSearchConfig(PluginConfigBase):
     __ui_order__ = 4
 
     order: List[str] = Field(
-        default=["openai", "brave", "tavily"],
+        default=["openai", "tavily", "brave"],
         description="参与搜图的服务及先后顺序，可选 openai、brave、tavily",
         json_schema_extra={
             "label": "搜图服务顺序",
-            "hint": "可选 openai、brave、tavily；没填密钥的服务自动跳过，全部没填时不网搜取图，只用游戏资料站和维基。",
+            "hint": "可选 openai、tavily、brave，默认按这个顺序（实测中文对象 OpenAI 最准、Tavily 次之、Brave 偏新闻图）；"
+                    "没填密钥的服务自动跳过，全部没填时不网搜取图，只用游戏资料站和维基。",
             "order": 0,
         },
     )
