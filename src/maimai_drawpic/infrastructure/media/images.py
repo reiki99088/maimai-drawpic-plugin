@@ -125,3 +125,45 @@ def review_image_payload(image_bytes: bytes) -> tuple[bytes, str]:
     output = BytesIO()
     sheet.save(output, format="PNG")
     return output.getvalue(), "png"
+
+
+def _flatten_rgb(image) -> PILImage.Image:
+    """透明底参考图铺白底，避免转 JPEG 后透明处变黑。"""
+    if image.mode in {"P", "LA", "RGBA"}:
+        rgba = image.convert("RGBA")
+        canvas = PILImage.new("RGB", rgba.size, "white")
+        canvas.paste(rgba, mask=rgba.getchannel("A"))
+        return canvas
+    return image.convert("RGB")
+
+
+def normalize_reference_image(
+    image_bytes: bytes, *, max_edge: int = 1536, min_short_edge: int = 256, max_aspect: float = 3.0,
+) -> tuple[bytes, tuple[int, int]]:
+    """把下载或上传的参考图规范成 JPEG：拒绝过小、过长条的图，缩到长边不超过 max_edge。"""
+
+    validate_image_bytes(image_bytes)
+    with PILImage.open(BytesIO(image_bytes)) as image:
+        image.seek(0)
+        width, height = image.size
+        if min(width, height) < min_short_edge:
+            raise ValueError(f"参考图太小：短边不足 {min_short_edge} 像素")
+        if max(width, height) > max_aspect * min(width, height):
+            raise ValueError("参考图长宽比过于悬殊")
+        frame = _flatten_rgb(image)
+    frame.thumbnail((max_edge, max_edge))
+    output = BytesIO()
+    frame.save(output, format="JPEG", quality=88)
+    return output.getvalue(), frame.size
+
+
+def shrink_image_jpeg(image_bytes: bytes, max_edge: int) -> bytes:
+    """给多模态模型看的缩略 JPEG；GIF 只取首帧。"""
+
+    with PILImage.open(BytesIO(image_bytes)) as image:
+        image.seek(0)
+        frame = _flatten_rgb(image)
+    frame.thumbnail((max_edge, max_edge))
+    output = BytesIO()
+    frame.save(output, format="JPEG", quality=85)
+    return output.getvalue()
