@@ -4,12 +4,14 @@
 """
 
 from dataclasses import dataclass, field
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+import asyncio
 
 from ..knowledge.prompts import compose_world_prompt
 from ..knowledge.service import WorldKnowledgeService, WorldResolution
 from ...domain.models.animation import AnimationOptions
 from .admission import update_task_owned
+from .types import ImageRequestAttempt
 
 # 这些平台把多张输入图当作参考图综合使用；NovelAI / ComfyUI 等会把参考图当底图重绘，只注入文字。
 WORLD_REFERENCE_PROVIDERS = frozenset({"openai", "google", "codex", "volcengine"})
@@ -92,3 +94,86 @@ class WorldKnowledgeMixin:
             self.task_store, task_id, status="running", message="世界知识检索完成", world_knowledge=metadata,
         )
         return injection if resolution.entries else None
+
+    async def verify_world_result(
+        self,
+        *,
+        world: WorldInjection,
+        task_id: str,
+        images: List[bytes],
+        attempt: ImageRequestAttempt,
+        matched_message_id: str,
+        request_negative_prompt: str,
+    ) -> List[bytes]:
+        """对照本次词条校验成图；严重画错时用同一模型重画一次，留下偏差更小的一张。
+
+        重画是新的生成请求而非失败重试：只做一次、不换模型、不额外扣次数；失败时保留原图。
+        """
+        service = self.world_knowledge_service
+        if (
+            service is None
+            or not service.general.world_knowledge_verify_enabled
+            or attempt.animation is not None
+            or not images
+        ):
+            return images
+        await update_task_owned(self.task_store, task_id, status="running", message="正在对照世界知识校验图片")
+        first = await service.verify(images[0], world.resolution, task_id=task_id)
+        report: Dict[str, Any] = {
+            "verdict": first.level, "checked": first.checked, "issues": self._clean_issues(first.issues),
+            "redrawn": False, "kept": "original",
+        }
+        result = images
+        if first.level == "SEVERE" and service.general.world_knowledge_redraw_enabled:
+            keep = world.kept_images
+            if attempt.is_fallback:
+                keep = min(
+                    self.world_reference_slots(attempt.model, len(world.user_images), None),
+                    len(world.resolution.images),
+                )
+            prompt, sources, urls, task_type = world.request(keep)
+            correction = first.correction or "; ".join(first.issues) or "Match the reference designs exactly."
+            prompt = f"{prompt}\n\n[Correction from review] {correction}"
+            await update_task_owned(
+                self.task_store, task_id, status="running", message="校验发现现实对象画错了，正在重画一次",
+            )
+            try:
+                redrawn = await self._run_image_request_attempt(
+                    attempt=attempt,
+                    prompt=prompt,
+                    task_id=task_id,
+                    task_type=task_type,
+                    source_image_bytes_list=sources,
+                    source_image_urls=urls,
+                    matched_message_id=matched_message_id,
+                    request_negative_prompt=request_negative_prompt,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                reason = self.task_store.sanitize_message(str(exc) or type(exc).__name__)[:160]
+                report["redraw_error"] = reason
+                self.ctx.logger.warning("世界知识重画失败，保留原图: task_id=%s reason=%s", task_id, reason)
+            else:
+                if redrawn:
+                    second = await service.verify(redrawn[0], world.resolution, task_id=task_id)
+                    report.update(
+                        redrawn=True, redraw_verdict=second.level, redraw_checked=second.checked,
+                        redraw_issues=self._clean_issues(second.issues),
+                    )
+                    if second.score <= first.score:  # 持平也留重画版：它带着修正说明
+                        result = redrawn
+                        report["kept"] = "redraw"
+        await update_task_owned(
+            self.task_store, task_id, status="running", message="世界知识校验完成",
+            world_knowledge={"verify": report},
+        )
+        self.ctx.logger.info(
+            "世界知识校验: task_id=%s verdict=%s checked=%s redrawn=%s redraw_verdict=%s kept=%s",
+            task_id, report["verdict"], report["checked"], report["redrawn"], report.get("redraw_verdict", ""),
+            report["kept"],
+        )
+        return result
+
+    def _clean_issues(self, issues: Any) -> List[str]:
+        return [self.task_store.sanitize_message(str(issue))[:80] for issue in list(issues)[:3]]

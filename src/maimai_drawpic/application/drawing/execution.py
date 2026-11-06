@@ -194,6 +194,15 @@ class ImageExecutionMixin:
                 )
                 return
 
+            if world is not None:
+                image_bytes_list = await self.verify_world_result(
+                    world=world,
+                    task_id=task_id,
+                    images=image_bytes_list,
+                    attempt=successful_attempt,
+                    matched_message_id=matched_message_id,
+                    request_negative_prompt=request_negative_prompt,
+                )
             await update_task_owned(
                 self.task_store,
                 task_id,

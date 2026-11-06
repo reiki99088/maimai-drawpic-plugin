@@ -205,3 +205,168 @@ def test_task_record_round_trips_world_metadata(tmp_path):
     reloaded = tasks.DrawTaskStore(path=tmp_path / "draw_tasks.json")
     reloaded.load()
     assert reloaded.get_task(record.task_id).world_knowledge == {"image_count": 1, "verdict": "PASS"}
+
+
+class SequenceLlm(FakeLlm):
+    """依次返回校验结论；用完后一直返回最后一条。"""
+
+    def __init__(self, verdicts, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.verdicts = list(verdicts)
+
+    async def generate(self, prompt, **kwargs):
+        response = await super().generate(prompt, **kwargs)
+        if self.calls[-1] == "verify":
+            response["response"] = self.verdicts.pop(0) if len(self.verdicts) > 1 else self.verdicts[0]
+        return response
+
+
+SEVERE = "结论：SEVERE\n问题：认成了别的角色\n修正：Draw Furina with her top hat."
+
+
+def verify_setup(plugin, monkeypatch, tmp_path, verdicts, *, redraw=True, fail_redraw=False):
+    service = plugin._require_draw_service()
+    world, ctx, _store = make_service(tmp_path / "world", llm=SequenceLlm(verdicts))
+    world.config.general.world_knowledge_verify_enabled = True
+    world.config.general.world_knowledge_redraw_enabled = redraw
+    service.world_knowledge_service = world
+    calls = capture_attempts(service, monkeypatch)
+    if fail_redraw:
+        original = service._run_image_request_attempt
+
+        async def run(**kwargs):
+            if "[Correction from review]" in kwargs["prompt"]:
+                raise module("domain.errors").ProviderRequestError(400, "invalid_request", "redraw rejected")
+            return await original(**kwargs)
+
+        monkeypatch.setattr(service, "_run_image_request_attempt", run)
+    return service, ctx, calls
+
+
+def test_pass_verdict_does_not_redraw(make_plugin, monkeypatch, tmp_path):
+    async def run():
+        plugin = make_plugin(False)
+        await plugin.on_load()
+        try:
+            await add_provider(plugin, "openai", "Primary", models=["primary-image"])
+            service, ctx, calls = verify_setup(plugin, monkeypatch, tmp_path, ["结论：PASS"])
+            receipt = await draw(plugin, service, "画芙宁娜")
+            assert len(calls) == 1 and ctx.llm.calls == ["extract", "card", "verify"]
+            record = plugin._task_store.get_task(receipt["task_id"])
+            assert record.status == "completed"
+            assert record.world_knowledge["verify"] == {
+                "verdict": "PASS", "checked": True, "issues": [], "redrawn": False, "kept": "original",
+            }
+            assert record.world_knowledge["entries"][0]["name"] == "芙宁娜"  # 校验结果与检索元数据合并保存
+        finally:
+            await plugin.on_unload()
+
+    asyncio.run(run())
+
+
+def test_severe_verdict_redraws_once_and_keeps_the_better_image(make_plugin, monkeypatch, tmp_path):
+    async def run():
+        plugin = make_plugin(False)
+        await plugin.on_load()
+        try:
+            await add_provider(plugin, "openai", "Primary", models=["primary-image"])
+            service, ctx, calls = verify_setup(plugin, monkeypatch, tmp_path, [SEVERE, "结论：MINOR\n问题：帽檐偏小"])
+            receipt = await draw(plugin, service, "画芙宁娜")
+            assert len(calls) == 2
+            assert calls[1]["prompt"].endswith("[Correction from review] Draw Furina with her top hat.")
+            assert calls[1]["sources"] == calls[0]["sources"] == 1
+            verify = plugin._task_store.get_task(receipt["task_id"]).world_knowledge["verify"]
+            assert verify["redrawn"] and verify["kept"] == "redraw" and verify["redraw_verdict"] == "MINOR"
+            assert verify["issues"] == ["认成了别的角色"] and verify["redraw_issues"] == ["帽檐偏小"]
+            assert ctx.llm.calls.count("verify") == 2
+        finally:
+            await plugin.on_unload()
+
+    asyncio.run(run())
+
+
+def test_worse_redraw_keeps_original_and_redraw_runs_only_once(make_plugin, monkeypatch, tmp_path):
+    async def run():
+        plugin = make_plugin(False)
+        await plugin.on_load()
+        try:
+            await add_provider(plugin, "openai", "Primary", models=["primary-image"])
+            service, _ctx, calls = verify_setup(plugin, monkeypatch, tmp_path, ["结论：MINOR", SEVERE])
+            await draw(plugin, service, "画芙宁娜")
+            assert len(calls) == 1  # MINOR 不重画
+
+            service2, _ctx2, calls2 = verify_setup(plugin, monkeypatch, tmp_path / "b", [SEVERE, SEVERE])
+            receipt = await draw(plugin, service2, "画芙宁娜")
+            assert len(calls2) == 2  # 重画后仍 SEVERE 也只重画一次；持平留重画版
+            verify = plugin._task_store.get_task(receipt["task_id"]).world_knowledge["verify"]
+            assert verify["kept"] == "redraw" and verify["redraw_verdict"] == "SEVERE"
+        finally:
+            await plugin.on_unload()
+
+    asyncio.run(run())
+
+
+def test_failed_redraw_keeps_original_and_completes(make_plugin, monkeypatch, tmp_path):
+    async def run():
+        plugin = make_plugin(False)
+        await plugin.on_load()
+        try:
+            await add_provider(plugin, "openai", "Primary", models=["primary-image"])
+            service, _ctx, calls = verify_setup(plugin, monkeypatch, tmp_path, [SEVERE], fail_redraw=True)
+            receipt = await draw(plugin, service, "画芙宁娜")
+            record = plugin._task_store.get_task(receipt["task_id"])
+            assert record.status == "completed" and record.result_count == 1
+            verify = record.world_knowledge["verify"]
+            assert verify["kept"] == "original" and not verify["redrawn"] and "redraw rejected" in verify["redraw_error"]
+        finally:
+            await plugin.on_unload()
+
+    asyncio.run(run())
+
+
+def test_redraw_switch_off_and_unparseable_verdict(make_plugin, monkeypatch, tmp_path):
+    async def run():
+        plugin = make_plugin(False)
+        await plugin.on_load()
+        try:
+            await add_provider(plugin, "openai", "Primary", models=["primary-image"])
+            service, _ctx, calls = verify_setup(plugin, monkeypatch, tmp_path, [SEVERE], redraw=False)
+            receipt = await draw(plugin, service, "画芙宁娜")
+            assert len(calls) == 1
+            assert plugin._task_store.get_task(receipt["task_id"]).world_knowledge["verify"]["verdict"] == "SEVERE"
+
+            service, _ctx, calls = verify_setup(plugin, monkeypatch, tmp_path / "b", ["看起来挺好"])
+            receipt = await draw(plugin, service, "画芙宁娜")
+            verify = plugin._task_store.get_task(receipt["task_id"]).world_knowledge["verify"]
+            assert len(calls) == 1 and verify["verdict"] == "PASS" and verify["checked"] is False
+        finally:
+            await plugin.on_unload()
+
+    asyncio.run(run())
+
+
+def test_gif_results_are_not_verified(make_plugin, monkeypatch, tmp_path):
+    async def run():
+        plugin = make_plugin(False)
+        await plugin.on_load()
+        try:
+            await add_provider(plugin, "openai", "Primary", models=["primary-image"])
+            service, ctx, _calls = verify_setup(plugin, monkeypatch, tmp_path, [SEVERE])
+            world = await service.prepare_world_knowledge(
+                task_id="", prompt="画芙宁娜", model="Primary/primary-image", source_images=[], source_urls=[],
+                animation=None, override=None,
+            )
+            attempt = module("application.drawing.types").ImageRequestAttempt(
+                model="Primary/primary-image", provider_name="openai", openai_compatibility_mode="",
+                animation=object(),
+            )
+            images = [b"GIF89a"]
+            result = await service.verify_world_result(
+                world=world, task_id="", images=images, attempt=attempt, matched_message_id="",
+                request_negative_prompt="",
+            )
+            assert result is images and "verify" not in ctx.llm.calls
+        finally:
+            await plugin.on_unload()
+
+    asyncio.run(run())
