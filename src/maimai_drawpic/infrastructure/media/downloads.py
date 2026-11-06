@@ -2,7 +2,7 @@
 
 from ipaddress import ip_address, ip_network
 from aiohttp.helpers import get_env_proxy_for_url
-from typing import Iterable, List
+from typing import Callable, Iterable, List, Mapping, Optional, Tuple
 from yarl import URL
 import aiohttp
 import asyncio
@@ -34,6 +34,10 @@ def _public_address(value: str) -> bool:
 # Clash / Mihomo / sing-box 等代理 TUN 的 fake-ip 地址段（RFC 2544 基准测试保留段）。
 # 仅供调用方显式允许，提供商结果下载默认不放行。
 FAKE_IP_NETWORK = ip_network("198.18.0.0/15")
+
+# 公开资料抓取的默认上限与"不可信来源"基准：基准地址不可能同源，因此不放行任何内网。
+MAX_PUBLIC_TEXT_BYTES = 1_500_000
+_UNTRUSTED_BASE = "https://reference.invalid"
 
 
 def _allowed_address(value: str, extra_networks: Iterable) -> bool:
@@ -109,6 +113,7 @@ async def download_image(
     timeout_seconds: int,
     skip_ip_check: bool = False,
     extra_allowed_networks: tuple = (),
+    headers: Optional[Mapping[str, str]] = None,
 ) -> bytes:
     """在有限预算内只恢复同一结果地址；每次重新选择代理并校验地址与跳转。"""
     current_budget().available()
@@ -123,6 +128,7 @@ async def download_image(
                         timeout_seconds=timeout_seconds,
                         skip_ip_check=skip_ip_check,
                         extra_allowed_networks=extra_allowed_networks,
+                        headers=headers,
                     )
                     return current_budget().accept(raw)
                 except ProviderDownloadError:
@@ -142,54 +148,160 @@ async def _download_image(
     timeout_seconds: int,
     skip_ip_check: bool,
     extra_allowed_networks: tuple = (),
+    headers: Optional[Mapping[str, str]] = None,
 ) -> bytes:
     """逐跳选择实际代理；直连默认只访问公网或管理员配置的同源服务。"""
-    current, trusted = _url(url), _url(base_url)
-    timeout = aiohttp.ClientTimeout(total=timeout_seconds)
     try:
         async with asyncio.timeout(timeout_seconds):
-            # 只读取代理环境，不启用 trust_env 的目标站点 .netrc 自动鉴权。
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                for hop in range(6):
-                    kwargs = proxy_settings.aiohttp_request_kwargs()
-                    if proxy_settings.enabled and proxy_settings.use_system_proxy:
-                        try:
-                            proxy, proxy_auth = get_env_proxy_for_url(current)
-                        except LookupError:
-                            pass  # NO_PROXY 命中或未配置代理时直连。
-                        else:
-                            kwargs.update(proxy=proxy, proxy_auth=proxy_auth)
-                    # NO_PROXY 或平台绕过代理时仍走直连校验，不能仅按 enabled 跳过 DNS。
-                    target = await _download_target(
-                        current,
-                        trusted,
-                        via_proxy=bool(kwargs.get("proxy")),
-                        skip_ip_check=skip_ip_check,
-                        extra_allowed_networks=extra_allowed_networks,
-                    )
-                    if current.scheme == "https":
-                        kwargs["server_hostname"] = current.raw_host
-                    # 不附加生成服务的鉴权头，关闭自动跳转，每一跳重新选择出站并校验地址。
-                    async with session.get(
-                        target, headers={"Host": current.raw_authority}, allow_redirects=False, **kwargs
-                    ) as response:
-                        if response.status in {301, 302, 303, 307, 308}:
-                            location = response.headers.get("Location")
-                            if not location or hop == 5:
-                                raise ProviderResultError("图片下载重定向无效或超过 5 次")
-                            current = _url(str(current.join(URL(location))))
-                            continue
-                        if response.status != 200:
-                            raise ProviderResultError(
-                                f"图片结果下载失败: HTTP {response.status} url={sanitize_provider_url(str(current))}"
-                            )
-                        raw = await read_response_bytes(response, max_bytes=current_budget().available())
-                        await asyncio.to_thread(validate_image_bytes, raw)
-                        return raw
+            raw, _final, _content_type = await _get_public(
+                url,
+                base_url=base_url,
+                proxy_settings=proxy_settings,
+                timeout_seconds=timeout_seconds,
+                skip_ip_check=skip_ip_check,
+                extra_allowed_networks=extra_allowed_networks,
+                max_bytes=current_budget().available,
+                headers=headers,
+            )
+            await asyncio.to_thread(validate_image_bytes, raw)
+            return raw
     except ProviderResultError:
         raise
     except (aiohttp.ClientConnectionError, aiohttp.ClientPayloadError, TimeoutError) as exc:
         raise ProviderDownloadError(f"图片结果传输中断（{type(exc).__name__}），未重新提交生成请求") from None
     except (aiohttp.ClientError, OSError, ValueError, RuntimeError) as exc:
         raise ProviderResultError(f"图片结果下载或校验失败（{type(exc).__name__}），未重新提交生成请求") from None
+
+
+async def _get_public(
+    url: str,
+    *,
+    base_url: str,
+    proxy_settings: HttpProxySettings,
+    timeout_seconds: int,
+    skip_ip_check: bool,
+    extra_allowed_networks: tuple,
+    max_bytes: Callable[[], int],
+    headers: Optional[Mapping[str, str]],
+) -> Tuple[bytes, URL, str]:
+    """逐跳 GET：每一跳重新选择出站并校验地址，返回正文、最终地址与 Content-Type。"""
+    current, trusted = _url(url), _url(base_url)
+    timeout = aiohttp.ClientTimeout(total=timeout_seconds)
+    # 只读取代理环境，不启用 trust_env 的目标站点 .netrc 自动鉴权。
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        for hop in range(6):
+            kwargs = proxy_settings.aiohttp_request_kwargs()
+            if proxy_settings.enabled and proxy_settings.use_system_proxy:
+                try:
+                    proxy, proxy_auth = get_env_proxy_for_url(current)
+                except LookupError:
+                    pass  # NO_PROXY 命中或未配置代理时直连。
+                else:
+                    kwargs.update(proxy=proxy, proxy_auth=proxy_auth)
+            # NO_PROXY 或平台绕过代理时仍走直连校验，不能仅按 enabled 跳过 DNS。
+            target = await _download_target(
+                current,
+                trusted,
+                via_proxy=bool(kwargs.get("proxy")),
+                skip_ip_check=skip_ip_check,
+                extra_allowed_networks=extra_allowed_networks,
+            )
+            if current.scheme == "https":
+                kwargs["server_hostname"] = current.raw_host
+            request_headers = dict(headers or {})
+            request_headers["Host"] = current.raw_authority
+            # 不附加生成服务的鉴权头，关闭自动跳转，每一跳重新选择出站并校验地址。
+            async with session.get(target, headers=request_headers, allow_redirects=False, **kwargs) as response:
+                if response.status in {301, 302, 303, 307, 308}:
+                    location = response.headers.get("Location")
+                    if not location or hop == 5:
+                        raise ProviderResultError("图片下载重定向无效或超过 5 次")
+                    current = _url(str(current.join(URL(location))))
+                    continue
+                if response.status != 200:
+                    raise ProviderResultError(
+                        f"图片结果下载失败: HTTP {response.status} url={sanitize_provider_url(str(current))}"
+                    )
+                raw = await read_response_bytes(response, max_bytes=max_bytes())
+                return raw, current, response.headers.get("Content-Type", "")
     raise ProviderResultError("图片结果下载未完成")
+
+
+class PublicFetchError(RuntimeError):
+    """公开资料抓取失败；与生成结果无关，调用方只应降级，不得据此重绘。"""
+
+
+def _fetch_reason(exc: BaseException) -> str:
+    message = str(exc)
+    if "非公网" in message:
+        return "地址指向非公网网络"
+    if "HTTP " in message:
+        return "HTTP " + message.split("HTTP ", 1)[1].split(" ", 1)[0]
+    if "重定向" in message:
+        return "重定向无效或超过 5 次"
+    if "URL" in message:
+        return "地址必须为不含凭据的 HTTP(S) URL"
+    if "大小限制" in message:
+        return "响应超过大小限制"
+    return type(exc).__name__
+
+
+async def fetch_public_bytes(
+    url: str,
+    *,
+    proxy_settings: HttpProxySettings,
+    timeout_seconds: float,
+    max_bytes: int = MAX_PUBLIC_TEXT_BYTES,
+    headers: Optional[Mapping[str, str]] = None,
+    extra_allowed_networks: tuple = (),
+) -> Tuple[bytes, str, str]:
+    """只读抓取公网资源（网页、JSON），不放行任何同源内网；失败统一抛 PublicFetchError。
+
+    返回正文、脱敏后的最终地址与 Content-Type。不做重试：资料抓取失败只降级。
+    """
+    try:
+        async with asyncio.timeout(timeout_seconds):
+            raw, final, content_type = await _get_public(
+                url,
+                base_url=_UNTRUSTED_BASE,
+                proxy_settings=proxy_settings,
+                timeout_seconds=max(1, int(timeout_seconds)),
+                skip_ip_check=False,
+                extra_allowed_networks=extra_allowed_networks,
+                max_bytes=lambda: max_bytes,
+                headers=headers,
+            )
+            return raw, sanitize_provider_url(str(final)), content_type
+    except TimeoutError:
+        raise PublicFetchError("资料抓取超时") from None
+    except (ProviderResultError, aiohttp.ClientError, OSError, ValueError, RuntimeError) as exc:
+        raise PublicFetchError(f"资料抓取失败：{_fetch_reason(exc)}") from None
+
+
+async def fetch_public_text(
+    url: str,
+    *,
+    proxy_settings: HttpProxySettings,
+    timeout_seconds: float,
+    max_bytes: int = MAX_PUBLIC_TEXT_BYTES,
+    headers: Optional[Mapping[str, str]] = None,
+    extra_allowed_networks: tuple = (),
+) -> Tuple[str, str]:
+    """按响应声明的字符集解码公网文本；未声明时按 UTF-8 宽松解码。"""
+    raw, final, content_type = await fetch_public_bytes(
+        url,
+        proxy_settings=proxy_settings,
+        timeout_seconds=timeout_seconds,
+        max_bytes=max_bytes,
+        headers=headers,
+        extra_allowed_networks=extra_allowed_networks,
+    )
+    charset = "utf-8"
+    for part in content_type.split(";")[1:]:
+        key, _, value = part.strip().partition("=")
+        if key.strip().lower() == "charset" and value.strip():
+            charset = value.strip().strip('"')
+    try:
+        return raw.decode(charset, errors="replace"), final
+    except LookupError:
+        return raw.decode("utf-8", errors="replace"), final
