@@ -237,7 +237,7 @@ class WorldKnowledgeService:
             for index, entry in enumerate(list(result.entries)):
                 if _left(deadline) < 3:
                     break
-                if entry["refs"] or not kind_allows_auto_image(entry["kind"]) or entry["status"] != "ok":
+                if not self._wants_auto_image(entry):
                     continue
                 tried = self._image_tried.get(entry["id"])
                 if tried is not None and self._now() - tried < IMAGE_RETRY_SECONDS:
@@ -256,6 +256,13 @@ class WorldKnowledgeService:
                         result.images.append((entry["id"], data))
         if result.entries:
             await run_owned_thread(self.store.touch_used, [entry["id"] for entry in result.entries])
+
+    @staticmethod
+    def _wants_auto_image(entry: Dict[str, Any]) -> bool:
+        return (
+            not entry["refs"] and entry.get("auto_image", True) and entry["status"] == "ok"
+            and kind_allows_auto_image(entry["kind"])
+        )
 
     async def _extract(self, text: str, deadline: float, result: WorldResolution) -> List[EntityMention]:
         prompt = EXTRACT_PROMPT.format(max_entities=self.general.world_knowledge_max_entities, text=text[:2000])
@@ -419,6 +426,41 @@ class WorldKnowledgeService:
             "entries": result.summary(),
             "warnings": list(result.warnings),
         }
+
+    # ------------------------------------------------------------------ 工作台
+
+    def refresh_entry(self, entry: Dict[str, Any]) -> bool:
+        """工作台「重新检索」：后台重查一条词条并补自动参考图；联网不可用或后台已满时返回 False。"""
+        if not self._online() or len(self._background) >= MAX_BACKGROUND_LOOKUPS:
+            return False
+        self._image_tried.pop(entry["id"], None)
+        task = asyncio.create_task(self._refresh(entry))
+        self._background.add(task)
+        task.add_done_callback(self._background.discard)
+        return True
+
+    async def _refresh(self, entry: Dict[str, Any]) -> None:
+        result = WorldResolution()
+        deadline = asyncio.get_running_loop().time() + self.general.world_knowledge_timeout_seconds
+        query = " ".join(part for part in (entry["franchise"], entry["name"]) if part)[:60]
+        mention = EntityMention(
+            name=entry["name"], kind=entry["kind"], franchise=entry["franchise"], aliases=tuple(entry["aliases"]),
+            query=query,
+        )
+        try:
+            saved = await self._search_and_card([(mention, entry)], deadline, result, "")
+            if self.general.world_knowledge_auto_images:
+                for item in saved:
+                    if self._wants_auto_image(item) and _left(deadline) >= 3:
+                        self._image_tried[item["id"]] = self._now()
+                        await self._attach_image(item, deadline, result)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # 后台任务：只记日志，不影响工作台
+            result.warn(f"重新检索出错（{type(exc).__name__}）")
+        self.ctx.logger.info(
+            "世界知识重新检索完成: entry_id=%s warnings=%s", entry["id"], len(result.warnings),
+        )
 
     # ------------------------------------------------------------------ 画后
 

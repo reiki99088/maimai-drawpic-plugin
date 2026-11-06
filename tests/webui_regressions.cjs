@@ -224,7 +224,7 @@ test('platform: a completed deletion cannot rerender a newer settings draft', as
 });
 async function settings() {
   let h;
-  const tabs = ['general', 'review', 'style'].map(section => node({ dataset: { section } }));
+  const tabs = ['general', 'review', 'style', 'knowledge'].map(section => node({ dataset: { section } }));
   h = harness('settings', {
     forms: { html: () => '', bind: (panel, fields, values) => {
       panel.values = structuredClone(values); return () => structuredClone(panel.values);
@@ -233,9 +233,9 @@ async function settings() {
     submitForm: form => form.onsubmit(event),
   });
   h.U.state.data = { revision: 7,
-    schema: { sections: { general: { fields: { timeout: {}, prompt_review_enabled: {} } }, style: { fields: { presets: {} } } } },
-    settings: { general: { timeout: 150, prompt_review_enabled: false }, style: { presets: [] } },
-    defaults: { general: { timeout: 150, prompt_review_enabled: false }, style: { presets: [] } } };
+    schema: { sections: { general: { fields: { timeout: {}, prompt_review_enabled: {}, world_knowledge_enabled: {} } }, style: { fields: { presets: {} } } } },
+    settings: { general: { timeout: 150, prompt_review_enabled: false, world_knowledge_enabled: false }, style: { presets: [] } },
+    defaults: { general: { timeout: 150, prompt_review_enabled: false, world_knowledge_enabled: false }, style: { presets: [] } } };
   const form = h.get('#settings-form');
   form.querySelector = () => null;
   form.append = panel => form.children.push(panel);
@@ -263,6 +263,18 @@ test('settings: all three category drafts survive switching and submit in one sn
   assert.equal(submitted.style.presets[0].name, 'draft');
   h.calls[0].resolve({ saved: true }); await flush();
   assert.equal(h.U.state.dirty, false);
+});
+test('settings: world knowledge fields get their own tab and save into general', async () => {
+  const h = await settings();
+  const panels = Object.fromEntries(h.form.children.map(p => [p.dataset.settingsPanel, p]));
+  assert.equal('world_knowledge_enabled' in panels.knowledge.values, true);
+  panels.knowledge.values.world_knowledge_enabled = true;
+  panels.general.values.world_knowledge_enabled = false; // the general tab must not own this field
+  h.tabs[3].onclick(); assert.equal(panels.knowledge.hidden, false); assert.equal(panels.general.hidden, true);
+  h.form.onsubmit(event);
+  const submitted = JSON.parse(h.calls[0].args.config_json);
+  assert.equal(submitted.general.world_knowledge_enabled, true);
+  assert.equal(submitted.general.timeout, 150);
 });
 test('settings: failed saves retain both category drafts and allow editing', async () => {
   const h = await settings();
@@ -460,6 +472,23 @@ test('studio GIF toggle sends animated with only the frame fields that were fill
   const sent = JSON.parse(h.calls[0].args.request_json);
   assert.equal(sent.animated, true); assert.equal(sent.frame_count, 4); assert.equal('frame_duration_ms' in sent, false);
 });
+test('studio world knowledge selector only sends an explicit per-request override', async () => {
+  const h = fifoController();
+  await h.U.views.studio();
+  assert.match(h.get('#workspace-content').innerHTML, /跟随总开关（已关闭）/);
+  const sent = [];
+  for (const [index, choice] of ['', 'on', 'off'].entries()) {
+    h.get('#draw-model').value = 'model'; h.get('#draw-prompt').value = 'world ' + choice;
+    h.get('#draw-world').value = choice;
+    h.get('#draw-form').onsubmit(event); await flush();
+    sent.push(JSON.parse(h.calls[h.calls.length - 1].args.request_json));
+    h.calls[h.calls.length - 1].resolve({ task_id: 'W' + index }); await flush();
+    h.calls[h.calls.length - 1].resolve(taskSnapshot('W' + index, { status: 'completed' })); await flush();
+  }
+  assert.equal('world_knowledge' in sent[0], false);
+  assert.equal(sent[1].world_knowledge, true);
+  assert.equal(sent[2].world_knowledge, false);
+});
 test('studio FIFO: same pending snapshot is not submitted twice after rebuild or input events', async () => {
   const h = fifoController(); await h.U.views.studio();
   h.get('#draw-model').value = 'model'; h.get('#draw-prompt').value = 'same';
@@ -605,4 +634,91 @@ test('bootstrap: pending transaction/runtime notices survive read refresh until 
   assert.equal(get('#load-error').hidden, true);
   assert.equal(get('#load-error').textContent, '');
   assert.doesNotMatch(read('boot.js'), /hidden\s*=\s*true/);
+});
+
+const knowledgeEntry = (extra = {}) => ({ id: 'w_0123456789', name: 'T1', aliases: ['SKT'], kind: 'esports_team',
+  kind_label: '电竞战队', franchise: 'LCK', look: '红黑队服', draw_hint: 'red jersey', facts: ['2025-11-09 夺冠'],
+  status: 'ok', locked_fields: ['look'], disabled: false, auto_image: true, expired: true, expires_at: '',
+  use_count: 2, sources: [{ title: 'T1 - Liquipedia', url: 'https://liquipedia.net/leagueoflegends/T1' },
+    { title: 'bad', url: 'javascript:alert(1)' }],
+  refs: [{ file: 'w_0123456789_ab.jpg', manual: true, source: 'manual', preview: 'data:image/webp;base64,AA' }],
+  ...extra });
+const knowledgeList = (items = [knowledgeEntry()], extra = {}) => ({ enabled: true, online: false, verify_enabled: false,
+  kinds: [{ value: 'esports_team', label: '电竞战队' }], items, total: items.length, page_size: 30, ...extra });
+async function knowledge(list = knowledgeList()) {
+  let h;
+  const locks = [];
+  const toasts = [];
+  h = harness('knowledge', { date: String, empty: title => 'EMPTY:' + title, navigate() {},
+    toast: message => toasts.push(message),
+    closeModal: async () => { h.closed = (h.closed || 0) + 1; },
+    modal: (title, html) => {
+      const content = h.get('#modal-content'); content.innerHTML = html; content.title = title;
+      content.querySelectorAll = selector => selector === '[data-lock]' ? locks : [];
+      return content;
+    } });
+  const opening = h.U.views.knowledge();
+  h.calls[0].resolve(list); await opening;
+  const click = dataset => h.get('#knowledge-list').onclick({ target: { closest: () => node({ dataset }) } });
+  return Object.assign(h, { locks, toasts, click });
+}
+test('knowledge: list renders state, locks, references and only http source links', async () => {
+  const h = await knowledge();
+  const html = h.get('#workspace-content').innerHTML;
+  assert.match(html, /总开关 已开启/); assert.match(html, /联网检索 不可用/);
+  assert.match(html, /锁定 外观/); assert.match(html, /已过期/); assert.match(html, /T1 - Liquipedia/);
+  assert.doesNotMatch(html, /javascript:/);
+  assert.match(html, /data-action="drop" data-entry="w_0123456789" data-file="w_0123456789_ab.jpg"/);
+  assert.equal(JSON.stringify(h.calls[0].args), '{"page":1,"search":""}');
+});
+test('knowledge: editing sends cleaned fields with the chosen locks, then reloads', async () => {
+  const h = await knowledge();
+  h.click({ action: 'edit', entry: 'w_0123456789' });
+  assert.equal(h.get('#kw-name').value, 'T1'); assert.equal(h.get('#kw-facts').value, '2025-11-09 夺冠');
+  h.get('#kw-look').value = '  红黑队服，白色字标 '; h.get('#kw-aliases').value = 'SKT， SK Telecom T1 、';
+  h.locks.push(node({ dataset: { lock: 'look' }, checked: true }), node({ dataset: { lock: 'name' }, checked: false }));
+  h.get('#knowledge-form').onsubmit(event); await flush();
+  assert.equal(h.calls[1].name, 'knowledge_save');
+  const sent = JSON.parse(h.calls[1].args.entry_json);
+  assert.equal(sent.id, 'w_0123456789'); assert.equal(sent.look, '红黑队服，白色字标');
+  assert.deepEqual(sent.aliases, ['SKT', 'SK Telecom T1']); assert.deepEqual(sent.locked_fields, ['look']);
+  h.calls[1].resolve({ entry: knowledgeEntry() }); await flush();
+  assert.equal(h.closed, 1); assert.equal(h.calls[2].name, 'knowledge');
+});
+test('knowledge: new entries carry no locks and more than three facts are refused locally', async () => {
+  const h = await knowledge(knowledgeList([]));
+  assert.match(h.get('#workspace-content').innerHTML, /EMPTY:词条库还是空的/);
+  h.get('#knowledge-new').onclick();
+  h.get('#kw-name').value = '芙宁娜'; h.get('#kw-facts').value = 'a\nb\nc\nd';
+  h.get('#knowledge-form').onsubmit(event); await flush();
+  assert.equal(h.calls.length, 1); assert.match(h.errors[0].message, /最多 3 条/);
+  h.get('#kw-facts').value = 'a'; h.get('#knowledge-form').onsubmit(event); await flush();
+  const sent = JSON.parse(h.calls[1].args.entry_json);
+  assert.equal('id' in sent, false); assert.equal('locked_fields' in sent, false);
+});
+test('knowledge: toggle, refresh, image drop and upload call their actions', async () => {
+  const h = await knowledge();
+  h.click({ action: 'toggle', entry: 'w_0123456789' }); await flush();
+  assert.deepEqual(JSON.parse(h.calls[1].args.entry_json), { id: 'w_0123456789', disabled: true });
+  h.calls[1].resolve({}); await flush(); h.calls[2].resolve(knowledgeList()); await flush();
+  h.click({ action: 'refresh', entry: 'w_0123456789' }); await flush();
+  assert.equal(h.calls[3].name, 'knowledge_refresh');
+  h.calls[3].resolve({ started: false, message: '已标记过期' }); await flush();
+  assert.ok(h.toasts.includes('已标记过期'));
+  h.calls[4].resolve(knowledgeList()); await flush();
+  h.click({ action: 'drop', entry: 'w_0123456789', file: 'w_0123456789_ab.jpg' }); await flush();
+  assert.equal(JSON.stringify(h.calls[5].args), '{"entry_id":"w_0123456789","file_name":"w_0123456789_ab.jpg"}');
+  h.calls[5].resolve({}); await flush(); h.calls[6].resolve(knowledgeList()); await flush();
+  let clicked = 0; h.get('#knowledge-file').click = () => clicked++;
+  h.click({ action: 'image', entry: 'w_0123456789' }); assert.equal(clicked, 1);
+  h.get('#knowledge-file').onchange({ target: { files: ['file'] } }); await flush();
+  assert.equal(h.calls[7].kind, 'upload'); assert.equal(h.calls[7].name, 'knowledge_image');
+  assert.equal(JSON.stringify(h.calls[7].args), '{"entry_id":"w_0123456789"}');
+});
+test('knowledge: a response after navigating away does not render', async () => {
+  const h = harness('knowledge', { empty: String, date: String });
+  const opening = h.U.views.knowledge();
+  h.U.state.view = 'tasks';
+  h.calls[0].resolve(knowledgeList()); await opening;
+  assert.equal(h.get('#workspace-content').innerHTML, '');
 });

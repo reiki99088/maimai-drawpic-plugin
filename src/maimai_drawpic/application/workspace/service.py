@@ -29,8 +29,10 @@ class WorkspaceService:
         get_config: Callable,
         apply_settings: Callable,
         refresh: Callable,
+        knowledge: Any = None,
     ) -> None:
         self.ctx, self.store, self.tasks, self.logs = ctx, store, tasks, logs
+        self.knowledge = knowledge
         self.get_config, self.apply_settings, self.refresh = get_config, apply_settings, refresh
         self.lock = asyncio.Lock()
         self._transaction: asyncio.Task | None = None

@@ -828,6 +828,21 @@ textarea {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 18px;
 }
+.card-grid.knowledge-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.knowledge-card p {
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+.knowledge-facts {
+  margin: 8px 0;
+  padding-left: 18px;
+}
+.knowledge-actions {
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
 .provider-card {
   padding: 22px;
   display: flex;
@@ -1369,6 +1384,7 @@ dialog::backdrop {
   }
   .studio-grid,
   .card-grid,
+  .card-grid.knowledge-grid,
   .form-grid,
   .field-row {
     grid-template-columns: 1fr;
@@ -1773,6 +1789,9 @@ dialog::backdrop {
           <button data-view="platforms" class="nav-item">
             <span data-icon="layers"></span>绘图平台
           </button>
+          <button data-view="knowledge" class="nav-item">
+            <span data-icon="globe"></span>世界知识
+          </button>
           <button data-view="settings" class="nav-item">
             <span data-icon="sliders"></span>偏好与预设
           </button>
@@ -1855,6 +1874,8 @@ dialog::backdrop {
     close: '<path d="m6 6 12 12M6 18 18 6"/>',
     download: '<path d="M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4"/>',
     eye: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
+    globe:
+      '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z"/>',
   };
   const state = {
     view: "studio",
@@ -1874,6 +1895,7 @@ dialog::backdrop {
     tasks: ["绘图任务", "每一次创作，都可以在这里找到。"],
     platforms: ["绘图平台", "用到哪个，就添加哪个。让每个模型各展所长。"],
     settings: ["偏好与预设", "把常用的选择，变成顺手的习惯。"],
+    knowledge: ["世界知识", "新角色、新战队、新产品，画之前先查清楚长什么样。"],
     logs: ["运行日志", "沿着任务链路，找到问题发生的位置。"],
   };
   const $ = (selector, root = document) => root.querySelector(selector);
@@ -3328,6 +3350,7 @@ dialog::backdrop {
       "chat-platform",
       "draw-frames",
       "draw-frame-ms",
+      "draw-world",
     ]) {
       const input = $("#" + id);
       if (input) draft[id] = input.value;
@@ -3500,7 +3523,7 @@ dialog::backdrop {
         )
         .join(
           "",
-        )}</select></div></div><div class="field"><label class="inline-choice"><input type="checkbox" role="switch" class="toggle" id="draw-animated" aria-describedby="anim-hint">输出 GIF 动图</label><div class="field-row" id="anim-options" hidden><div class="field"><label for="draw-frames">帧数（2～16）</label><input id="draw-frames" type="number" min="2" max="16" step="1" placeholder="默认 9"></div><div class="field"><label for="draw-frame-ms">每帧毫秒（20～2000）</label><input id="draw-frame-ms" type="number" min="20" max="2000" step="10" placeholder="默认 200"></div></div><p class="hint" id="anim-hint"></p></div>${mode === "edit_image" ? `<div class="field"><label>源图片</label><div class="upload-zone" id="upload-zone">${icon("upload")}<p>拖放图片到这里，或选择文件</p><button type="button" id="source-button" class="button secondary compact">${icon("upload")}选择源图片</button><input type="file" id="source-file" accept="image/png,image/jpeg,image/webp" multiple hidden></div><div class="source-list" id="source-list"></div><p class="hint">上传真实源图；最终支持数量以模型为准。需要公网原图 URL 的模型不支持直接使用网页上传的本地图片。</p></div>` : ""}<details><summary class="muted" style="cursor:pointer;margin-bottom:15px">反向提示词与发送选项</summary><div class="field"><label for="draw-negative">反向提示词</label><textarea id="draw-negative" rows="2" maxlength="16000" placeholder="不希望出现在画面中的内容"></textarea></div><div class="field"><label for="draw-delivery">结果去向</label><select id="draw-delivery"><option value="web">仅在工作台查看</option><option value="chat">同时发送到聊天</option></select></div><div id="delivery-fields" hidden><div class="field-row"><div class="field"><label for="chat-platform">聊天平台标识</label><input id="chat-platform" value="qq" maxlength="80"></div><div class="field"><label>&nbsp;</label><button type="button" id="load-streams" class="button secondary wide">加载聊天会话</button></div></div><div class="field"><label for="draw-stream">目标会话</label><select id="draw-stream"><option value="">请先加载会话</option></select><p class="hint">使用实际聊天流；发送到聊天时沿用群聊或私聊额度。网页专用任务由当前实例管理，不计入聊天额度。</p></div></div></details><div class="sticky-save"><span class="hint">模型校验 · 提示词与图片审核</span><button type="submit" class="button" id="start-drawing">${icon("sparkles")}开始绘图</button></div></form></section><aside class="stack"><section class="panel"><div class="panel-header"><h3>创作结果</h3>${icon("images")}</div><div id="studio-submissions" aria-live="polite"></div><div id="studio-result"><div class="placeholder-art">${icon("sparkles")}<span>想象，正在等待落笔</span><small>任务提交后，会在这里显示进度与生成图片。</small></div></div></section><div class="panel"><h3>让画面更接近你的想法</h3><p class="hint">描述具体的主体、环境和光线。试试风格预设，把常用的画面语言保存下来。</p><button class="button ghost compact" id="studio-presets" style="margin-top:8px">管理预设 ${icon("arrow")}</button></div></aside></div>`;
+        )}</select></div></div><div class="field"><label class="inline-choice"><input type="checkbox" role="switch" class="toggle" id="draw-animated" aria-describedby="anim-hint">输出 GIF 动图</label><div class="field-row" id="anim-options" hidden><div class="field"><label for="draw-frames">帧数（2～16）</label><input id="draw-frames" type="number" min="2" max="16" step="1" placeholder="默认 9"></div><div class="field"><label for="draw-frame-ms">每帧毫秒（20～2000）</label><input id="draw-frame-ms" type="number" min="20" max="2000" step="10" placeholder="默认 200"></div></div><p class="hint" id="anim-hint"></p></div><div class="field"><label for="draw-world">世界知识</label><select id="draw-world" aria-describedby="world-hint"><option value="">跟随总开关（${state.data.settings?.general?.world_knowledge_enabled ? "已开启" : "已关闭"}）</option><option value="on">本次开启</option><option value="off">本次关闭</option></select><p class="hint" id="world-hint">开启后先识别画面里的游戏角色、战队、新产品等现实对象，联网补充外观和参考图；会多花检索时间，开启画后校验时严重画错会重画一次。</p></div>${mode === "edit_image" ? `<div class="field"><label>源图片</label><div class="upload-zone" id="upload-zone">${icon("upload")}<p>拖放图片到这里，或选择文件</p><button type="button" id="source-button" class="button secondary compact">${icon("upload")}选择源图片</button><input type="file" id="source-file" accept="image/png,image/jpeg,image/webp" multiple hidden></div><div class="source-list" id="source-list"></div><p class="hint">上传真实源图；最终支持数量以模型为准。需要公网原图 URL 的模型不支持直接使用网页上传的本地图片。</p></div>` : ""}<details><summary class="muted" style="cursor:pointer;margin-bottom:15px">反向提示词与发送选项</summary><div class="field"><label for="draw-negative">反向提示词</label><textarea id="draw-negative" rows="2" maxlength="16000" placeholder="不希望出现在画面中的内容"></textarea></div><div class="field"><label for="draw-delivery">结果去向</label><select id="draw-delivery"><option value="web">仅在工作台查看</option><option value="chat">同时发送到聊天</option></select></div><div id="delivery-fields" hidden><div class="field-row"><div class="field"><label for="chat-platform">聊天平台标识</label><input id="chat-platform" value="qq" maxlength="80"></div><div class="field"><label>&nbsp;</label><button type="button" id="load-streams" class="button secondary wide">加载聊天会话</button></div></div><div class="field"><label for="draw-stream">目标会话</label><select id="draw-stream"><option value="">请先加载会话</option></select><p class="hint">使用实际聊天流；发送到聊天时沿用群聊或私聊额度。网页专用任务由当前实例管理，不计入聊天额度。</p></div></div></details><div class="sticky-save"><span class="hint">模型校验 · 提示词与图片审核</span><button type="submit" class="button" id="start-drawing">${icon("sparkles")}开始绘图</button></div></form></section><aside class="stack"><section class="panel"><div class="panel-header"><h3>创作结果</h3>${icon("images")}</div><div id="studio-submissions" aria-live="polite"></div><div id="studio-result"><div class="placeholder-art">${icon("sparkles")}<span>想象，正在等待落笔</span><small>任务提交后，会在这里显示进度与生成图片。</small></div></div></section><div class="panel"><h3>让画面更接近你的想法</h3><p class="hint">描述具体的主体、环境和光线。试试风格预设，把常用的画面语言保存下来。</p><button class="button ghost compact" id="studio-presets" style="margin-top:8px">管理预设 ${icon("arrow")}</button></div></aside></div>`;
     for (const [id, value] of Object.entries(draft)) {
       const input = $("#" + id);
       if (
@@ -3618,6 +3641,9 @@ dialog::backdrop {
           if (frames !== undefined) request.frame_count = frames;
           if (duration !== undefined) request.frame_duration_ms = duration;
         }
+        // 只有明确选了本次开/关才带字段，跟随总开关时签名与旧请求一致。
+        const world = $("#draw-world").value;
+        if (world) request.world_knowledge = world === "on";
         const signature = JSON.stringify(request);
         let entry = submissions.get(signature);
         if (!entry) {
@@ -3817,10 +3843,206 @@ dialog::backdrop {
 (() => {
   "use strict";
   const U = window.DrawpicUI,
+    { state, $, e, icon, call, buttonAction, toast } = U;
+  const STATUS = { ok: "已查到", not_found: "未查到", error: "检索出错", manual: "手工词条" };
+  const FIELDS = {
+    name: "名称",
+    aliases: "别名",
+    kind: "种类",
+    franchise: "所属作品",
+    look: "外观",
+    draw_hint: "绘图提示",
+    facts: "近期事实",
+  };
+  let generation = 0,
+    entries = new Map(),
+    kinds = [],
+    uploadTarget = null;
+  const current = (token) => state.view === "knowledge" && token === generation;
+  const split = (text, pattern) =>
+    text.split(pattern).map((item) => item.trim()).filter(Boolean);
+  function host(url) {
+    try {
+      return new URL(url).hostname;
+    } catch {
+      return url;
+    }
+  }
+  function card(item) {
+    const status = item.disabled
+      ? '<span class="pill failed">已禁用</span>'
+      : `<span class="pill ${["ok", "manual"].includes(item.status) ? "completed" : "pending"}">${e(STATUS[item.status] || item.status)}</span>`;
+    const locked = item.locked_fields.length
+      ? `<span class="pill" title="自动刷新不会覆盖这些字段">锁定 ${e(item.locked_fields.map((key) => FIELDS[key] || key).join("、"))}</span>`
+      : "";
+    const refs = item.refs
+      .map(
+        (ref) =>
+          `<div class="source-item" title="${ref.manual ? "手工上传" : e("自动 · " + (ref.source || "网页"))}">${ref.preview ? `<img src="${e(ref.preview)}" alt="${e(item.name)} 参考图">` : ""}<button type="button" class="icon-button" data-action="drop" data-entry="${e(item.id)}" data-file="${e(ref.file)}" aria-label="删除${ref.manual ? "手工" : "自动"}参考图">×</button></div>`,
+      )
+      .join("");
+    const sources = item.sources
+      .filter((source) => /^https?:\/\//.test(source.url))
+      .map(
+        (source) =>
+          `<a href="${e(source.url)}" target="_blank" rel="noopener noreferrer">${e(source.title || host(source.url))}</a>`,
+      )
+      .join(" · ");
+    const meta = [
+      item.status !== "manual" && item.expires_at && !item.expired ? `有效期至 ${U.date(item.expires_at)}` : "",
+      item.use_count ? `用过 ${item.use_count} 次` : "",
+      item.auto_image ? "" : "不自动找图",
+    ].filter(Boolean);
+    return `<article class="panel knowledge-card"><div class="panel-header"><div><h3>${e(item.name)}</h3><p class="hint">${e([item.franchise, item.aliases.join(" / ")].filter(Boolean).join(" · "))}</p></div><div class="actions"><span class="pill">${e(item.kind_label)}</span>${status}${item.expired && !item.disabled ? '<span class="pill pending">已过期</span>' : ""}${locked}</div></div>${item.look ? `<p><strong>外观</strong> ${e(item.look)}</p>` : '<p class="hint">还没有外观描述</p>'}${item.facts.length ? `<ul class="hint knowledge-facts">${item.facts.map((fact) => `<li>${e(fact)}</li>`).join("")}</ul>` : ""}${refs ? `<div class="source-list">${refs}</div>` : ""}${sources ? `<p class="hint">来源：${sources}</p>` : ""}${meta.length ? `<p class="hint">${e(meta.join(" · "))}</p>` : ""}<div class="actions knowledge-actions"><button type="button" class="button secondary compact" data-action="edit" data-entry="${e(item.id)}">编辑</button><button type="button" class="button secondary compact" data-action="image" data-entry="${e(item.id)}">${icon("upload")}上传参考图</button><button type="button" class="button secondary compact" data-action="refresh" data-entry="${e(item.id)}" ${item.disabled ? "disabled" : ""}>${icon("refresh")}重新检索</button><button type="button" class="button ghost compact" data-action="toggle" data-entry="${e(item.id)}">${item.disabled ? "取消禁用" : "这是群梗（禁用）"}</button><button type="button" class="button ghost compact" data-action="delete" data-entry="${e(item.id)}">删除</button></div></article>`;
+  }
+  function editor(item, token) {
+    const value = item || {
+      name: "",
+      aliases: [],
+      kind: "esports_team",
+      franchise: "",
+      look: "",
+      draw_hint: "",
+      facts: [],
+      auto_image: true,
+      locked_fields: [],
+    };
+    const node = U.modal(
+      item ? `编辑词条：${item.name}` : "新建手工词条",
+      `<form id="knowledge-form"><div class="field-row"><div class="field"><label for="kw-name">名称</label><input id="kw-name" maxlength="24" required></div><div class="field"><label for="kw-kind">种类</label><select id="kw-kind">${kinds.map((kind) => `<option value="${e(kind.value)}">${e(kind.label)}</option>`).join("")}</select></div></div><div class="field-row"><div class="field"><label for="kw-franchise">所属作品 / 赛区</label><input id="kw-franchise" maxlength="24" placeholder="例如 英雄联盟、原神"></div><div class="field"><label for="kw-aliases">别名</label><input id="kw-aliases" maxlength="300" placeholder="用逗号分隔，最多 8 个"></div></div><div class="field"><label for="kw-look">外观</label><input id="kw-look" maxlength="40" aria-describedby="kw-look-hint"><p class="hint" id="kw-look-hint">最多 40 字，只写看得见的特征：配色、标志、发型、服装。</p></div><div class="field"><label for="kw-hint">绘图提示（英文）</label><textarea id="kw-hint" rows="2" maxlength="200" placeholder="red and black team jersey with the T1 wordmark"></textarea></div><div class="field"><label for="kw-facts">近期事实</label><textarea id="kw-facts" rows="3" aria-describedby="kw-facts-hint"></textarea><p class="hint" id="kw-facts-hint">每行一条，最多 3 条，建议带日期；只用来防止画面或台词说错。</p></div><div class="field"><label class="inline-choice"><input type="checkbox" role="switch" class="toggle" id="kw-auto-image">没有参考图时自动找图</label></div>${item ? `<fieldset class="field"><legend>锁定字段</legend><div class="choice-list">${Object.entries(FIELDS).map(([key, label]) => `<label class="choice-item"><input type="checkbox" data-lock="${key}" ${item.locked_fields.includes(key) ? "checked" : ""}>${label}</label>`).join("")}</div><p class="hint">锁定的字段自动刷新不会覆盖；这次改过的字段保存时会自动锁定。</p></fieldset>` : ""}<div class="modal-footer"><button type="button" class="button secondary" id="kw-cancel">取消</button><button type="submit" class="button" id="kw-save">保存</button></div></form>`,
+    );
+    $("#kw-name", node).value = value.name;
+    $("#kw-kind", node).value = value.kind;
+    $("#kw-franchise", node).value = value.franchise;
+    $("#kw-aliases", node).value = value.aliases.join("，");
+    $("#kw-look", node).value = value.look;
+    $("#kw-hint", node).value = value.draw_hint;
+    $("#kw-facts", node).value = value.facts.join("\n");
+    $("#kw-auto-image", node).checked = value.auto_image;
+    $("#kw-cancel", node).onclick = () => U.closeModal(true);
+    $("#knowledge-form", node).onsubmit = (event) => {
+      event.preventDefault();
+      buttonAction($("#kw-save", node), async () => {
+        const fields = {
+          name: $("#kw-name", node).value.trim(),
+          kind: $("#kw-kind", node).value,
+          franchise: $("#kw-franchise", node).value.trim(),
+          aliases: split($("#kw-aliases", node).value, /[,，、;；\n]+/),
+          look: $("#kw-look", node).value.trim(),
+          draw_hint: $("#kw-hint", node).value.trim(),
+          facts: split($("#kw-facts", node).value, /\n+/),
+          auto_image: $("#kw-auto-image", node).checked,
+        };
+        if (fields.facts.length > 3) throw new Error("近期事实最多 3 条");
+        if (item) {
+          fields.id = item.id;
+          fields.locked_fields = [...node.querySelectorAll("[data-lock]")]
+            .filter((box) => box.checked)
+            .map((box) => box.dataset.lock);
+        }
+        await call("action", "knowledge_save", { entry_json: JSON.stringify(fields) });
+        await U.closeModal(true);
+        toast(item ? "词条已保存，改过的字段已锁定" : "已新建手工词条");
+        if (current(token)) await U.views.knowledge();
+      });
+    };
+  }
+  async function act(button, token) {
+    const { action, entry: id, file } = button.dataset;
+    const item = entries.get(id);
+    if (!item) return;
+    if (action === "edit") return editor(item, token);
+    if (action === "image") {
+      uploadTarget = id;
+      $("#knowledge-file").value = "";
+      $("#knowledge-file").click();
+      return;
+    }
+    return buttonAction(button, async () => {
+      if (action === "refresh") {
+        const result = await call("action", "knowledge_refresh", { entry_id: id });
+        toast(result.message);
+      } else if (action === "toggle") {
+        await call("action", "knowledge_save", {
+          entry_json: JSON.stringify({ id, disabled: !item.disabled }),
+        });
+        toast(item.disabled ? "已取消禁用" : "已禁用：这个词之后不再检索或注入");
+      } else if (action === "drop") {
+        await call("action", "knowledge_image_drop", { entry_id: id, file_name: file });
+        toast("已删除参考图");
+      } else if (action === "delete") {
+        const result = await call("action", "knowledge_delete", { entry_id: id });
+        toast(result.deleted ? "已删除词条" : "词条已不存在");
+      }
+      if (current(token)) await U.views.knowledge();
+    });
+  }
+  U.views.knowledge = async () => {
+    const token = ++generation;
+    state.knowledgePage ||= 1;
+    state.knowledgeSearch ??= "";
+    const result = await call("query", "knowledge", {
+      page: state.knowledgePage,
+      search: state.knowledgeSearch,
+    });
+    if (!current(token)) return;
+    const pages = Math.max(1, Math.ceil(result.total / result.page_size));
+    if (!result.items.length && state.knowledgePage > pages) {
+      state.knowledgePage = pages;
+      return U.views.knowledge();
+    }
+    entries = new Map(result.items.map((item) => [item.id, item]));
+    kinds = result.kinds;
+    $("#workspace-content").innerHTML =
+      `<div class="toolbar"><div class="actions"><span class="pill ${result.enabled ? "enabled" : ""}">总开关 ${result.enabled ? "已开启" : "已关闭"}</span><span class="pill ${result.online ? "enabled" : "failed"}">联网检索 ${result.online ? "可用" : "不可用"}</span><span class="pill ${result.verify_enabled ? "enabled" : ""}">画后校验 ${result.verify_enabled ? "已开启" : "已关闭"}</span><button type="button" id="knowledge-settings" class="button ghost compact">世界知识设置 ${icon("arrow")}</button></div><button type="button" id="knowledge-new" class="button compact">${icon("plus")}新建手工词条</button></div><form id="knowledge-search" class="toolbar"><div class="actions"><input id="knowledge-search-text" class="search-input" maxlength="100" placeholder="搜索名称、别名或所属作品" aria-label="搜索词条"><button type="submit" class="button secondary">搜索</button></div><span class="hint">共 ${result.total} 条 · 改过的字段会锁定，自动刷新不覆盖</span></form><input type="file" id="knowledge-file" accept="image/png,image/jpeg,image/webp" hidden><div id="knowledge-list">${result.items.length ? `<div class="card-grid knowledge-grid">${result.items.map(card).join("")}</div>` : U.empty("词条库还是空的", "开启世界知识后，画到游戏角色、战队、新产品等现实对象时会自动建词条；也可以先手工建一条，比如上传战队队标。")}</div><div class="actions pagination"><button type="button" id="knowledge-previous" class="button secondary compact" ${state.knowledgePage <= 1 ? "disabled" : ""}>上一页</button><span class="hint">第 ${state.knowledgePage} / ${pages} 页</span><button type="button" id="knowledge-next" class="button secondary compact" ${state.knowledgePage >= pages ? "disabled" : ""}>下一页</button></div>`;
+    $("#knowledge-search-text").value = state.knowledgeSearch;
+    U.bindSubmit($("#knowledge-search"));
+    $("#knowledge-search").onsubmit = (event) => {
+      event.preventDefault();
+      state.knowledgeSearch = $("#knowledge-search-text").value.trim();
+      state.knowledgePage = 1;
+      U.views.knowledge().catch(U.error);
+    };
+    $("#knowledge-settings").onclick = () => {
+      state.settingsSection = "knowledge";
+      U.navigate("settings");
+    };
+    $("#knowledge-new").onclick = () => editor(null, token);
+    $("#knowledge-list").onclick = (event) => {
+      const button = event.target.closest("[data-action]");
+      if (button) Promise.resolve(act(button, token)).catch(U.error);
+    };
+    $("#knowledge-file").onchange = (event) => {
+      const file = event.target.files[0], id = uploadTarget;
+      uploadTarget = null;
+      if (!file || !id) return;
+      call("upload", "knowledge_image", { entry_id: id }, file)
+        .then(async () => {
+          toast("已设为手工参考图，出图时优先使用");
+          if (current(token)) await U.views.knowledge();
+        })
+        .catch(U.error);
+    };
+    $("#knowledge-previous").onclick = () => {
+      state.knowledgePage--;
+      U.views.knowledge().catch(U.error);
+    };
+    $("#knowledge-next").onclick = () => {
+      state.knowledgePage++;
+      U.views.knowledge().catch(U.error);
+    };
+  };
+})();
+
+(() => {
+  "use strict";
+  const U = window.DrawpicUI,
     { state, $, call, buttonAction, toast } = U;
-  const sections = { general: "通用配置", review: "审核配置", style: "风格预设" };
-  const sourceSection = (name) => name === "review" ? "general" : name;
-  const reviewField = (key) => /^(prompt|image)_review_/.test(key);
+  const sections = { general: "通用配置", review: "审核配置", style: "风格预设", knowledge: "世界知识" };
+  const sourceSection = (name) => ["review", "knowledge"].includes(name) ? "general" : name;
+  // 通用配置里的审核、世界知识字段各自成页，其余留在通用。
+  const generalSection = (key) =>
+    /^(prompt|image)_review_/.test(key) ? "review" : /^world_knowledge_/.test(key) ? "knowledge" : "general";
   U.views.settings = async () => {
     let selected = Object.hasOwn(sections, state.settingsSection)
       ? state.settingsSection
@@ -3850,7 +4072,7 @@ dialog::backdrop {
       panel.hidden = name !== selected;
       const fields = Object.fromEntries(
         Object.entries(state.data.schema.sections[sourceSection(name)].fields)
-          .filter(([key]) => name === "style" || reviewField(key) === (name === "review")),
+          .filter(([key]) => name === "style" || generalSection(key) === name),
       );
       panel.innerHTML = U.forms.html(fields, values);
       const old = $(`#${panel.id}`, form);
@@ -3873,6 +4095,8 @@ dialog::backdrop {
           ? "把常用风格保存为提示词模板，三个分类的修改可一起保存。"
           : name === "review"
             ? "分别设置提示词审核和生成图片审核，使用 MaiBot 配置的审核模型。切换分类保留草稿。"
+          : name === "knowledge"
+            ? "画到游戏角色、战队选手、新产品等现实对象时先联网查外观与参考图，可选出图后对照校验。词条在左侧「世界知识」页管理。"
           : "切换分类会保留草稿，点击右上角“保存全部设置”统一保存。";
       for (const tab of document.querySelectorAll("[data-section]")) {
         const active = tab.dataset.section === name;
@@ -3935,7 +4159,9 @@ dialog::backdrop {
       if (form.inert || requiresRefresh) return;
       buttonAction(save, async () => {
         const all = {
-          general: { ...state.data.settings.general, ...readers.general(), ...readers.review() },
+          general: {
+            ...state.data.settings.general, ...readers.general(), ...readers.review(), ...readers.knowledge(),
+          },
           style: readers.style(),
         };
         form.inert = true;

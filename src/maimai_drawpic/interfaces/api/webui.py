@@ -88,6 +88,36 @@ class WebUIAPIMixin(WorkspaceAPIBase):
     ) -> Dict[str, Any]:
         return await asyncio.to_thread(self._workspace().logs.query, task_id, level, limit, cursor)
 
+    @API("workspace_knowledge_list", version="1")
+    @workspace_endpoint
+    async def workspace_knowledge_list(self, page: int = 1, search: str = "") -> Dict[str, Any]:
+        return await self._workspace().knowledge.list(page, search)
+
+    @API("workspace_knowledge_save", version="1")
+    @workspace_endpoint
+    async def workspace_knowledge_save(self, entry_json: str) -> Dict[str, Any]:
+        return await self._workspace().knowledge.save(entry_json)
+
+    @API("workspace_knowledge_delete", version="1")
+    @workspace_endpoint
+    async def workspace_knowledge_delete(self, entry_id: str) -> Dict[str, Any]:
+        return await self._workspace().knowledge.delete(entry_id)
+
+    @API("workspace_knowledge_refresh", version="1")
+    @workspace_endpoint
+    async def workspace_knowledge_refresh(self, entry_id: str) -> Dict[str, Any]:
+        return await self._workspace().knowledge.refresh(entry_id)
+
+    @API("workspace_knowledge_image", version="1")
+    @workspace_endpoint
+    async def workspace_knowledge_image(self, upload_id: str, entry_id: str) -> Dict[str, Any]:
+        return await self._workspace().knowledge.add_image(upload_id, entry_id)
+
+    @API("workspace_knowledge_image_drop", version="1")
+    @workspace_endpoint
+    async def workspace_knowledge_image_drop(self, entry_id: str, file_name: str) -> Dict[str, Any]:
+        return await self._workspace().knowledge.drop_image(entry_id, file_name)
+
     @API("workspace_streams", version="1")
     @workspace_endpoint
     async def workspace_streams(self, platform: str = "qq") -> Dict[str, Any]:

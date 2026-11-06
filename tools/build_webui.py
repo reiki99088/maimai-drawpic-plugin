@@ -21,6 +21,7 @@ def build() -> Path:
         "platforms",
         "studio",
         "tasks",
+        "knowledge",
         "settings",
         "logs",
         "boot",

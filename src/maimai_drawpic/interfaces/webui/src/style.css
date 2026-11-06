@@ -821,6 +821,21 @@ textarea {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 18px;
 }
+.card-grid.knowledge-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.knowledge-card p {
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+.knowledge-facts {
+  margin: 8px 0;
+  padding-left: 18px;
+}
+.knowledge-actions {
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
 .provider-card {
   padding: 22px;
   display: flex;
@@ -1362,6 +1377,7 @@ dialog::backdrop {
   }
   .studio-grid,
   .card-grid,
+  .card-grid.knowledge-grid,
   .form-grid,
   .field-row {
     grid-template-columns: 1fr;

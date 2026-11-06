@@ -6,6 +6,7 @@ import asyncio
 
 from ...infrastructure.observability.logging import WorkspaceLogStore
 from ...infrastructure.concurrency import run_owned_thread, wait_owned
+from .knowledge import WorkspaceKnowledgeService
 from .service import WorkspaceService
 from .tasks import WorkspaceTaskService
 from ...interfaces.chat.message_images import _evict_expired_source_image_cache, clear_source_image_cache
@@ -110,6 +111,13 @@ async def attach_workspace(plugin: Any) -> None:
         get_config=lambda: plugin.config,
         apply_settings=apply_settings,
         refresh=lambda: refresh_runtime(plugin),
+        knowledge=WorkspaceKnowledgeService(
+            ctx=plugin.ctx,
+            data_dir=plugin.ctx.paths.data_dir,
+            get_store=lambda: plugin._world_store,
+            get_service=lambda: plugin._world_service,
+            get_config=lambda: plugin.config,
+        ),
     )
 
     plugin._workspace_cleanup_task = asyncio.create_task(maintain_workspace(plugin), name="drawpic-storage-cleanup")

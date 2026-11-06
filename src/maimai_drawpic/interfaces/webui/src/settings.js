@@ -2,9 +2,11 @@
   "use strict";
   const U = window.DrawpicUI,
     { state, $, call, buttonAction, toast } = U;
-  const sections = { general: "通用配置", review: "审核配置", style: "风格预设" };
-  const sourceSection = (name) => name === "review" ? "general" : name;
-  const reviewField = (key) => /^(prompt|image)_review_/.test(key);
+  const sections = { general: "通用配置", review: "审核配置", style: "风格预设", knowledge: "世界知识" };
+  const sourceSection = (name) => ["review", "knowledge"].includes(name) ? "general" : name;
+  // 通用配置里的审核、世界知识字段各自成页，其余留在通用。
+  const generalSection = (key) =>
+    /^(prompt|image)_review_/.test(key) ? "review" : /^world_knowledge_/.test(key) ? "knowledge" : "general";
   U.views.settings = async () => {
     let selected = Object.hasOwn(sections, state.settingsSection)
       ? state.settingsSection
@@ -34,7 +36,7 @@
       panel.hidden = name !== selected;
       const fields = Object.fromEntries(
         Object.entries(state.data.schema.sections[sourceSection(name)].fields)
-          .filter(([key]) => name === "style" || reviewField(key) === (name === "review")),
+          .filter(([key]) => name === "style" || generalSection(key) === name),
       );
       panel.innerHTML = U.forms.html(fields, values);
       const old = $(`#${panel.id}`, form);
@@ -57,6 +59,8 @@
           ? "把常用风格保存为提示词模板，三个分类的修改可一起保存。"
           : name === "review"
             ? "分别设置提示词审核和生成图片审核，使用 MaiBot 配置的审核模型。切换分类保留草稿。"
+          : name === "knowledge"
+            ? "画到游戏角色、战队选手、新产品等现实对象时先联网查外观与参考图，可选出图后对照校验。词条在左侧「世界知识」页管理。"
           : "切换分类会保留草稿，点击右上角“保存全部设置”统一保存。";
       for (const tab of document.querySelectorAll("[data-section]")) {
         const active = tab.dataset.section === name;
@@ -119,7 +123,9 @@
       if (form.inert || requiresRefresh) return;
       buttonAction(save, async () => {
         const all = {
-          general: { ...state.data.settings.general, ...readers.general(), ...readers.review() },
+          general: {
+            ...state.data.settings.general, ...readers.general(), ...readers.review(), ...readers.knowledge(),
+          },
           style: readers.style(),
         };
         form.inert = true;

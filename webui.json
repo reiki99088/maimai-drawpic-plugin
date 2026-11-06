@@ -139,6 +139,22 @@
               "max_length": 80
             }
           }
+        },
+        "knowledge": {
+          "api": "workspace_knowledge_list",
+          "version": "1",
+          "parameters": {
+            "page": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "search": {
+              "type": "string",
+              "required": false,
+              "max_length": 100
+            }
+          }
         }
       },
       "actions": {
@@ -245,12 +261,82 @@
             }
           },
           "confirmation": "取消这个绘图任务？已发送到绘图平台的请求可能仍会计费。"
+        },
+        "knowledge_save": {
+          "api": "workspace_knowledge_save",
+          "version": "1",
+          "parameters": {
+            "entry_json": {
+              "type": "string",
+              "required": true,
+              "max_length": 16384
+            }
+          }
+        },
+        "knowledge_delete": {
+          "api": "workspace_knowledge_delete",
+          "version": "1",
+          "parameters": {
+            "entry_id": {
+              "type": "string",
+              "required": true,
+              "max_length": 16
+            }
+          },
+          "confirmation": "删除这条世界知识词条和它的参考图？之后用到时会重新检索。"
+        },
+        "knowledge_refresh": {
+          "api": "workspace_knowledge_refresh",
+          "version": "1",
+          "parameters": {
+            "entry_id": {
+              "type": "string",
+              "required": true,
+              "max_length": 16
+            }
+          }
+        },
+        "knowledge_image": {
+          "api": "workspace_knowledge_image",
+          "version": "1",
+          "parameters": {
+            "upload_id": {
+              "type": "string",
+              "required": true,
+              "max_length": 200
+            },
+            "entry_id": {
+              "type": "string",
+              "required": true,
+              "max_length": 16
+            }
+          }
+        },
+        "knowledge_image_drop": {
+          "api": "workspace_knowledge_image_drop",
+          "version": "1",
+          "parameters": {
+            "entry_id": {
+              "type": "string",
+              "required": true,
+              "max_length": 16
+            },
+            "file_name": {
+              "type": "string",
+              "required": true,
+              "max_length": 64
+            }
+          }
         }
       },
       "uploads": {
         "source": {
           "action": "source",
           "image_max_edge": 4000
+        },
+        "knowledge_image": {
+          "action": "knowledge_image",
+          "image_max_edge": 2048
         }
       }
     }

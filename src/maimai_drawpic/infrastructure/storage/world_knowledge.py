@@ -275,6 +275,8 @@ def _normalize_entry(raw: Any) -> Optional[Dict[str, Any]]:
         "expires_at": _line(raw.get("expires_at"), 32),
         "locked_fields": [field for field in raw.get("locked_fields") or [] if field in EDITABLE_FIELDS],
         "disabled": bool(raw.get("disabled")),
+        # 用户删过自动图后不再自动取图，避免把认错的图又找回来；可在工作台重新打开。
+        "auto_image": raw.get("auto_image", True) is not False,
         "created_at": _line(raw.get("created_at"), 32),
         "updated_at": _line(raw.get("updated_at"), 32),
         "last_used_at": _line(raw.get("last_used_at"), 32),
@@ -457,7 +459,7 @@ class WorldKnowledgeStore:
     def save_manual(self, entry_id: Optional[str], fields: Dict[str, Any]) -> Dict[str, Any]:
         """工作台保存词条：新建（entry_id 为空）或修改；改过的字段自动锁定。
 
-        fields 可含 EDITABLE_FIELDS、disabled，以及 locked_fields（显式给出时以它为准，用于解锁）。
+        fields 可含 EDITABLE_FIELDS、disabled、auto_image，以及 locked_fields（显式给出时以它为准，用于解锁）。
         """
         now = _now()
         entries = self._working_copy()
@@ -487,6 +489,8 @@ class WorldKnowledgeStore:
                 raise ValueError(f"名称或别名与词条「{other['name']}」重复")
         if "disabled" in fields:
             entry["disabled"] = bool(fields["disabled"])
+        if "auto_image" in fields:
+            entry["auto_image"] = bool(fields["auto_image"])
         locked = fields.get("locked_fields")
         base = {field for field in locked if field in EDITABLE_FIELDS} if isinstance(locked, list) else set(
             entry["locked_fields"]
@@ -606,9 +610,12 @@ class WorldKnowledgeStore:
     def drop_image(self, entry_id: str, file_name: str) -> bool:
         entries = self._working_copy()
         entry = next((item for item in entries if item["id"] == entry_id), None)
-        if entry is None or all(ref["file"] != file_name for ref in entry["refs"]):
+        ref = next((item for item in entry["refs"] if item["file"] == file_name), None) if entry else None
+        if entry is None or ref is None:
             return False
-        entry["refs"] = [ref for ref in entry["refs"] if ref["file"] != file_name]
+        if not ref["manual"]:
+            entry["auto_image"] = False
+        entry["refs"] = [item for item in entry["refs"] if item["file"] != file_name]
         entry["updated_at"] = _iso(_now())
         self._save(entries)
         self._unlink_unused([file_name], entries)
