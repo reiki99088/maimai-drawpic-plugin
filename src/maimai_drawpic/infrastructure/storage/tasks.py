@@ -53,6 +53,7 @@ class DrawTaskRecord:
     last_status_query_at: datetime | None = None
     submission: Dict[str, Any] = field(default_factory=dict)
     error: Optional[Dict[str, Any]] = None
+    world_knowledge: Dict[str, Any] = field(default_factory=dict)
 
 
 class DrawTaskStore:
@@ -309,6 +310,7 @@ class DrawTaskStore:
         generated_count: Optional[int] = None,
         expected_delivery_count: Optional[int] = None,
         delivery_unconfirmed: Optional[bool] = None,
+        world_knowledge: Optional[Dict[str, Any]] = None,
     ) -> DrawTaskRecord | None:
         """更新任务状态；任务不存在时返回 None 而非抛出 KeyError。"""
 
@@ -333,6 +335,8 @@ class DrawTaskStore:
             record.expected_delivery_count = expected_delivery_count
         if delivery_unconfirmed is not None:
             record.delivery_unconfirmed = delivery_unconfirmed
+        if world_knowledge is not None:
+            record.world_knowledge = {**record.world_knowledge, **world_knowledge}
         if sent_count is not None:
             record.sent_count = sent_count
         if model is not None:
@@ -459,6 +463,9 @@ class DrawTaskStore:
                 last_status_query_at=last_status_query_at,
                 submission=dict(submission),
                 error=payload.get("error"),
+                world_knowledge=(
+                    dict(payload["world_knowledge"]) if isinstance(payload.get("world_knowledge"), dict) else {}
+                ),
             )
         except Exception:
             return None

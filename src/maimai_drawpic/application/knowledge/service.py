@@ -113,16 +113,26 @@ class WorldKnowledgeService:
         self.config = config
         self.ctx = ctx
         self.store = store
-        self.finder = finder or WorldImageFinder(
-            proxy_settings=proxy_settings,
-            cache_dir=store.root,
-            timeout_seconds=SEARCH_TIMEOUT_SECONDS,
-            extra_allowed_networks=(FAKE_IP_NETWORK,) if config.general.world_knowledge_allow_fake_ip else (),
-        )
+        self._custom_finder = finder is not None
+        self.finder = finder or self._make_finder(proxy_settings)
         self._clock = clock
         self._offline_until = 0.0
         self._image_tried: Dict[str, float] = {}
         self._background: Set[asyncio.Task] = set()
+
+    def _make_finder(self, proxy_settings: HttpProxySettings) -> WorldImageFinder:
+        return WorldImageFinder(
+            proxy_settings=proxy_settings,
+            cache_dir=self.store.root,
+            timeout_seconds=SEARCH_TIMEOUT_SECONDS,
+            extra_allowed_networks=(FAKE_IP_NETWORK,) if self.general.world_knowledge_allow_fake_ip else (),
+        )
+
+    def reconfigure(self, config: DrawpicConfig, *, proxy_settings: HttpProxySettings) -> None:
+        """配置刷新时沿用词条库、联网退避与后台检索，只换配置和取图代理。"""
+        self.config = config
+        if not self._custom_finder:
+            self.finder = self._make_finder(proxy_settings)
 
     # ------------------------------------------------------------------ 开关
 

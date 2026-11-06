@@ -14,6 +14,8 @@ from .attempts import RequestAttemptRunnerMixin
 from .prompts import PromptReviewMixin
 from .planning import RequestPlanningMixin
 from .execution import ImageExecutionMixin
+from .world import WorldKnowledgeMixin
+from ..knowledge import WorldKnowledgeService
 from .queries import TaskQueryMixin
 from .admission import persist_submission, tracked_submission, wait_for_admission
 from ...domain.task_errors import ModelAccessError, task_error
@@ -21,7 +23,12 @@ from ...domain.models.animation import AnimationOptions
 
 
 class DrawService(
-    RequestAttemptRunnerMixin, PromptReviewMixin, RequestPlanningMixin, ImageExecutionMixin, TaskQueryMixin
+    RequestAttemptRunnerMixin,
+    PromptReviewMixin,
+    RequestPlanningMixin,
+    ImageExecutionMixin,
+    WorldKnowledgeMixin,
+    TaskQueryMixin,
 ):
     """协调平台路由与绘图任务所需的独立职责。"""
 
@@ -111,6 +118,7 @@ class DrawService(
         task_store: DrawTaskStore,
         result_store: ImageResultStore | None = None,
         agent_threads: CodexThreadStore | None = None,
+        world_knowledge_service: WorldKnowledgeService | None = None,
     ) -> None:
         self.ctx = ctx
         self.router = router
@@ -119,6 +127,7 @@ class DrawService(
         self.task_store = task_store
         self.result_store = result_store
         self.agent_threads = agent_threads
+        self.world_knowledge_service = world_knowledge_service
         self.background_tasks: set[asyncio.Task[Any]] = set()
         self._submissions: dict[asyncio.Task[Any], int] = {}
         self._started_task_ids: set[str] = set()
@@ -293,6 +302,7 @@ class DrawService(
         on_task_successful: Callable[[str, str, str], Awaitable[None] | None] | None = None,
         submission: Optional[Dict[str, Any]] = None,
         restricted_models_allowed: bool = False,
+        world_knowledge: bool | None = None,
     ) -> dict[str, Any]:
         """启动后台绘图任务，源图为空时文生图，存在源图时图生图。
 
@@ -393,6 +403,7 @@ class DrawService(
                 on_task_unsuccessful=on_task_unsuccessful,
                 on_task_successful=on_task_successful,
                 restricted_models_allowed=restricted_models_allowed,
+                world_knowledge=world_knowledge,
             ),
             name=f"maimai-drawpic:{task_record.task_id}",
         )

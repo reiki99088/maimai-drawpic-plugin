@@ -21,6 +21,8 @@ from ..domain.styles import StylePromptResolver
 from .chat import ChatStreamService
 from ..infrastructure.storage.tasks import DrawTaskStore
 from ..infrastructure.storage.agent_threads import CodexThreadStore
+from ..infrastructure.storage.world_knowledge import WorldKnowledgeStore
+from .knowledge import WorldKnowledgeService
 from ..infrastructure.storage.quotas import UserQuotaStore
 from ..infrastructure.storage.platforms import PLATFORM_NAMES, WorkspaceConfigStore, host_config, host_default_config
 from ..infrastructure.storage.results import ImageResultStore
@@ -63,6 +65,8 @@ class DrawpicRuntime(MaiBotPlugin):
         self._result_store: ImageResultStore | None = None
         self._workspace_service: WorkspaceService | None = None
         self._workspace_cleanup_task: asyncio.Task | None = None
+        self._world_store: WorldKnowledgeStore | None = None
+        self._world_service: WorldKnowledgeService | None = None
 
     @property
     def config(self) -> DrawpicConfig:
@@ -145,6 +149,8 @@ class DrawpicRuntime(MaiBotPlugin):
         )
         self._usage_store = UserQuotaStore(path=self._data_dir / "user_quotas.json", logger=self.ctx.logger)
         self._agent_threads = CodexThreadStore(self._data_dir / "codex_agent", logger=self.ctx.logger)
+        self._world_store = WorldKnowledgeStore(self._data_dir)
+        self._world_service = None
 
     def _load_agent_threads(self) -> None:
         """读取 Codex 会话索引并清理过期会话目录；索引损坏只停用接续，不影响其他平台。"""
@@ -216,6 +222,14 @@ class DrawpicRuntime(MaiBotPlugin):
         self._style_prompt_resolver = StylePromptResolver(self.config.style)
         self._stream_service = ChatStreamService(self.ctx)
         self._moderation_service = DrawpicModerationService(self.config, self.ctx)
+        # 词条库与后台检索跨配置刷新保留；只更新配置和取图代理。
+        world_proxy = self._router._get_proxy_settings("openai")
+        if self._world_service is None:
+            self._world_service = WorldKnowledgeService(
+                self.config, self.ctx, self._world_store, proxy_settings=world_proxy
+            )
+        else:
+            self._world_service.reconfigure(self.config, proxy_settings=world_proxy)
         self._image_reply_renderer = PinkImageReplyRenderer()
         # A submitting caller may still hold an otherwise idle service across an await.
         # Keep weak registration of every live service instead of using running tasks
@@ -236,6 +250,7 @@ class DrawpicRuntime(MaiBotPlugin):
                 task_store=self._task_store,
                 result_store=self._result_store,
                 agent_threads=self._agent_threads,
+                world_knowledge_service=self._world_service,
             )
             self._draw_services.add(self._draw_service)
         self._platform_store.pending_model_renames.clear()
@@ -351,6 +366,8 @@ class DrawpicRuntime(MaiBotPlugin):
         if self._draw_service is None:
             return
         await close_workspace(self)
+        if self._world_service is not None:
+            await self._world_service.close()
         await asyncio.to_thread(self._require_session_store().save)
         await asyncio.to_thread(self._task_store.save)
         await asyncio.to_thread(self._usage_store.save)

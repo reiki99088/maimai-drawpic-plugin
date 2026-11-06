@@ -35,8 +35,12 @@ class ImageExecutionMixin:
         on_task_unsuccessful: Callable[[str, str, str], Awaitable[None] | None] | None = None,
         on_task_successful: Callable[[str, str, str], Awaitable[None] | None] | None = None,
         restricted_models_allowed: bool = False,
+        world_knowledge: bool | None = None,
     ) -> None:
-        """后台执行绘图任务，源图为空时文生图，存在源图时图生图。"""
+        """后台执行绘图任务，源图为空时文生图，存在源图时图生图。
+
+        world_knowledge 为 None 时跟随世界知识总开关，True/False 为本次请求的覆盖。
+        """
 
         self._started_task_ids.add(task_id)
         notified = False
@@ -115,9 +119,32 @@ class ImageExecutionMixin:
                 self.ctx.logger.warning("绘图任务记录已失效，终止后台执行: task_id=%s task_type=%s", task_id, task_type)
                 await _notify_task_unsuccessful("failed", "任务记录已失效")
                 return
+            request_prompt, request_sources, request_urls, request_task_type = (
+                prompt, normalized_source_images, normalized_source_urls, task_type,
+            )
+            world = None
+            if self.world_knowledge_service is not None:
+                try:
+                    world = await self.prepare_world_knowledge(
+                        task_id=task_id,
+                        prompt=prompt,
+                        model=resolved_model,
+                        source_images=normalized_source_images,
+                        source_urls=normalized_source_urls,
+                        animation=animation,
+                        override=world_knowledge,
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # 世界知识只增强绘图，不能让任务失败
+                    self.ctx.logger.warning(
+                        "世界知识接入失败，按原提示词绘图: task_id=%s error_type=%s", task_id, type(exc).__name__
+                    )
+            if world is not None:
+                request_prompt, request_sources, request_urls, request_task_type = world.request(world.kept_images)
             primary_attempt = self._build_image_request_attempt(
                 model=resolved_model,
-                task_type=task_type,
+                task_type=request_task_type,
                 openai_compatibility_mode=openai_compatibility_mode,
                 novelai_mode=novelai_mode,
                 novelai_artist_tags=novelai_artist_tags,
@@ -135,17 +162,18 @@ class ImageExecutionMixin:
             image_bytes_list, successful_attempt, attempt_errors = await self._execute_request_plan(
                 primary_attempt=primary_attempt,
                 primary_model=resolved_model,
-                prompt=prompt,
+                prompt=request_prompt,
                 task_id=task_id,
-                task_type=task_type,
+                task_type=request_task_type,
                 openai_compatibility_mode=openai_compatibility_mode,
                 novelai_mode=novelai_mode,
                 novelai_artist_tags=novelai_artist_tags,
-                source_image_bytes_list=normalized_source_images,
-                source_image_urls=normalized_source_urls,
+                source_image_bytes_list=request_sources,
+                source_image_urls=request_urls,
                 matched_message_id=matched_message_id,
                 request_negative_prompt=request_negative_prompt,
                 restricted_models_allowed=restricted_models_allowed,
+                world=world,
             )
 
             if successful_attempt is None:

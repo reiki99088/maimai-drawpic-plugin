@@ -41,7 +41,9 @@
     "chat.get_stream_by_user_id",
     "message.get_recent",
     "message.get_by_id",
-    "webui.claim_upload"
+    "webui.claim_upload",
+    "web.search",
+    "web.fetch"
   ],
   "i18n": {
     "default_locale": "zh-CN",

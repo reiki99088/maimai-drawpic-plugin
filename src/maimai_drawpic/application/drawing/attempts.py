@@ -5,6 +5,7 @@ import aiohttp
 
 from ...domain.errors import ProviderError, ProviderOutcomeUnknown, ProviderResultError, ProviderSubmittedError
 from .types import ImageRequestAttempt
+from .world import WorldInjection
 from .admission import update_task_owned
 from ...domain.task_errors import provider_task_error
 
@@ -26,21 +27,32 @@ class RequestAttemptRunnerMixin:
         matched_message_id: str,
         request_negative_prompt: str,
         restricted_models_allowed: bool = False,
+        world: Optional[WorldInjection] = None,
     ) -> Tuple[List[bytes], Optional[ImageRequestAttempt], List[str]]:
         # 模式参数只携带调用方/会话的显式覆盖；空值由每个备选实例自行解析默认值。
+        # world 存在时首选请求已含世界参考图；备选模型按自身能力重新裁剪接在末尾的世界参考图。
         errors: List[str] = []
         failure = None
         seen = set()
         models = [primary_model, *self.router.resolve_fallback_models(primary_model)]
         retry_count = self.router.config.general.request_retry_count
         for position, model in enumerate(models):
+            attempt_prompt, attempt_sources, attempt_urls, attempt_task_type = (
+                prompt, source_image_bytes_list, source_image_urls, task_type,
+            )
+            if world is not None and position:
+                keep = min(
+                    self.world_reference_slots(model, len(world.user_images), primary_attempt.animation),
+                    len(world.resolution.images),
+                )
+                attempt_prompt, attempt_sources, attempt_urls, attempt_task_type = world.request(keep)
             attempt = (
                 primary_attempt
                 if position == 0
                 else self._build_fallback_image_request_attempt(
                     primary_model=primary_model,
                     primary_effective_model=primary_attempt.model,
-                    task_type=task_type,
+                    task_type=attempt_task_type,
                     openai_compatibility_mode=openai_compatibility_mode,
                     novelai_mode=novelai_mode,
                     novelai_artist_tags=novelai_artist_tags,
@@ -64,7 +76,7 @@ class RequestAttemptRunnerMixin:
                 )
                 continue
             try:
-                self.router.validate_source_image_count(attempt.model, len(source_image_bytes_list))
+                self.router.validate_source_image_count(attempt.model, len(attempt_sources))
             except ValueError as exc:
                 errors.append(self._format_attempt_error(attempt, str(exc)))
                 self.ctx.logger.warning("备选模型源图数量校验拒绝: task_id=%s model=%s reason=%s", task_id, model, exc)
@@ -81,11 +93,11 @@ class RequestAttemptRunnerMixin:
                 try:
                     images = await self._run_image_request_attempt(
                         attempt=attempt,
-                        prompt=prompt,
+                        prompt=attempt_prompt,
                         task_id=task_id,
-                        task_type=task_type,
-                        source_image_bytes_list=source_image_bytes_list,
-                        source_image_urls=source_image_urls,
+                        task_type=attempt_task_type,
+                        source_image_bytes_list=attempt_sources,
+                        source_image_urls=attempt_urls,
                         matched_message_id=matched_message_id,
                         request_negative_prompt=request_negative_prompt,
                     )
@@ -94,11 +106,11 @@ class RequestAttemptRunnerMixin:
                     self.ctx.logger.info(
                         "模型尝试成功: task_id=%s task_type=%s provider=%s model=%s attempt=%s source_image_count=%s",
                         task_id,
-                        task_type,
+                        attempt_task_type,
                         attempt.provider_name,
                         attempt.model,
                         retry + 1,
-                        len(source_image_bytes_list),
+                        len(attempt_sources),
                     )
                     return images, attempt, errors
                 except Exception as exc:
