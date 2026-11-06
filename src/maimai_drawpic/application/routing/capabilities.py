@@ -8,6 +8,7 @@ from ...domain.models.aliyun_profiles import (
     supports_aliyun_negative_prompt,
 )
 from ...domain.models.codex_profiles import MAX_CODEX_SOURCE_IMAGES
+from ...domain.models.openai_profiles import GIF_MODE_UNSUPPORTED_REASON, supports_gif_output
 from ...domain.models.rinkoai_profiles import RINKOAI_EDIT_UNSUPPORTED_REASON, is_rinkoai_nai_model
 from ...infrastructure.providers.gemini import GoogleImage
 from ...infrastructure.providers.siliconflow import SiliconFlowImage
@@ -214,6 +215,29 @@ class TaskCapabilityMixin:
             reason="",
             source=("aliyun_registry" if provider_name == "aliyun" else "provider_default"),
         )
+
+    def evaluate_model_animation_capability(self, model: str, openai_compatibility_mode: str = "") -> ModelTaskCapability:
+        """GIF 动图只在 gpt-image-2.6 的 Images API / Responses 路径可用，其他组合在提交前拒绝。"""
+
+        normalized_model = model.strip()
+        if self.get_model_provider(normalized_model) != "openai":
+            return ModelTaskCapability(
+                allowed=False,
+                reason=f"当前模型 {normalized_model} 不支持 GIF 动图输出；目前仅 OpenAI gpt-image-2.6 系列支持",
+                source="provider_builtin",
+            )
+        route = self.resolve_openai_model_route(normalized_model)
+        upstream_model = route.upstream_model if route is not None else normalized_model
+        if not supports_gif_output(upstream_model):
+            return ModelTaskCapability(
+                allowed=False,
+                reason=f"当前模型 {normalized_model} 不支持 GIF 动图输出；目前仅 gpt-image-2.6 系列支持",
+                source="openai_gif_registry",
+            )
+        mode = self.resolve_openai_compatibility_mode(openai_compatibility_mode, normalized_model)
+        if mode in {"chat_completions", "rinkoai"}:
+            return ModelTaskCapability(allowed=False, reason=GIF_MODE_UNSUPPORTED_REASON, source="openai_mode")
+        return ModelTaskCapability(allowed=True, reason="", source="openai_gif_registry")
 
     def validate_source_image_count(self, model: str, image_count: int) -> None:
         """在审核和额度预留前拒绝超出模型能力的输入，禁止静默丢图。"""

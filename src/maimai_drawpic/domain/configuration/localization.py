@@ -185,6 +185,9 @@ _FIELD_LABELS: Dict[str, Tuple[str, str, str]] = {
     ),
     "default_size": ("Default Resolution", "既定の解像度", "기본 해상도"),
     "edit_size_mode": ("Image Edit Size", "画像編集のサイズ", "이미지 편집 크기"),
+    "request_mode": ("Request Mode", "リクエスト方式", "요청 방식"),
+    "responses_main_model": ("Responses Main Model", "Responses メインモデル", "Responses 메인 모델"),
+    "responses_poll_interval_seconds": ("Responses Poll Interval", "Responses ポーリング間隔", "Responses 폴링 간격"),
     "default_style": ("Default Style", "既定スタイル", "기본 스타일"),
     "description": ("Description", "説明", "설명"),
     "enabled": ("Enabled", "有効", "활성화"),
@@ -469,6 +472,43 @@ _OPENAI_MODE_HINTS = (
 
 
 _FIELD_HINT_OVERRIDES: Dict[str, Tuple[str, str, str]] = {
+    "OpenAIModelConfig.request_mode": (
+        "images: call the image generation/edit endpoints directly (default). responses_background: submit a "
+        "Responses API background task and poll for the result, so every HTTP request stays short and proxies that "
+        "drop connections idle for ~100 seconds cannot cut long requests. Only for OpenAI or services fully "
+        "compatible with /v1/responses; applies to gpt-image models only and leaves chat drawing and RinkoAI modes "
+        "unchanged. OpenAI keeps the result for about 10 minutes. Raise the general image request timeout to about "
+        "300 seconds as well.",
+        "images：画像生成／編集エンドポイントを直接呼び出します（既定）。responses_background：Responses API の"
+        "バックグラウンドタスクとして送信し結果をポーリングします。各 HTTP リクエストが短くなり、約 100 秒無通信の接続を"
+        "切断するプロキシでも長い生成が途切れません。OpenAI 公式または /v1/responses に完全対応したサービスのみ対応し、"
+        "gpt-image 系列にだけ適用され、チャット描画と RinkoAI モードには影響しません。結果は OpenAI 側に約 10 分保持されます。"
+        "一般設定の画像リクエストのタイムアウトも 300 秒程度に上げてください。",
+        "images: 이미지 생성/편집 엔드포인트를 직접 호출합니다(기본값). responses_background: Responses API 백그라운드 "
+        "작업으로 제출한 뒤 결과를 폴링합니다. 모든 HTTP 요청이 짧아져 약 100초 동안 데이터가 없으면 연결을 끊는 프록시에서도 "
+        "긴 생성이 끊기지 않습니다. OpenAI 공식 또는 /v1/responses를 완전히 지원하는 서비스에서만 사용할 수 있으며, "
+        "gpt-image 계열에만 적용되고 채팅 그리기와 RinkoAI 모드에는 영향이 없습니다. 결과는 OpenAI 측에 약 10분간 보관됩니다. "
+        "일반 설정의 이미지 요청 시간 제한도 300초 정도로 늘리세요.",
+    ),
+    "OpenAICompatibleInstanceConfig.request_mode": (
+        "images calls the image endpoints directly; responses_background submits a Responses API background task and "
+        "polls, avoiding proxy idle disconnects. gpt-image models only.",
+        "images は画像エンドポイントを直接呼び出し、responses_background は Responses API のバックグラウンドタスクを"
+        "送信してポーリングし、プロキシの無通信切断を避けます。gpt-image 系列のみ対象です。",
+        "images는 이미지 엔드포인트를 직접 호출하고, responses_background는 Responses API 백그라운드 작업을 제출해 "
+        "폴링하여 프록시의 무통신 연결 끊김을 피합니다. gpt-image 계열에만 적용됩니다.",
+    ),
+    "OpenAIModelConfig.responses_main_model": (
+        "Used only by responses_background. The main model just forwards the prompt verbatim, so a cheap small model "
+        "is enough.",
+        "responses_background でのみ使用します。メインモデルはプロンプトをそのまま渡すだけなので、安価な小型モデルで十分です。",
+        "responses_background에서만 사용합니다. 메인 모델은 프롬프트를 그대로 전달하기만 하므로 저렴한 소형 모델이면 충분합니다.",
+    ),
+    "OpenAIModelConfig.responses_poll_interval_seconds": (
+        "Seconds between status checks, 1 to 30, default 3; very low values may hit query rate limits.",
+        "状態確認の間隔（秒）。1～30、既定 3。低すぎると照会のレート制限に当たることがあります。",
+        "상태 확인 간격(초), 1～30, 기본값 3. 너무 낮으면 조회 속도 제한에 걸릴 수 있습니다.",
+    ),
     "OpenAIModelConfig.edit_size_mode": (
         "source: follow the aspect ratio of the first source image (default). configured: always use the default "
         "resolution or per-model override above; useful when reference images differ from the target canvas, "

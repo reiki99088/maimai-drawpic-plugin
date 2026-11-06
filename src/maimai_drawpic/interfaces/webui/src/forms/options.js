@@ -23,6 +23,9 @@
     furry: "兽人",
     background: "背景画",
     images_api: "图片接口",
+    images: "图片接口（直接请求）",
+    responses_background: "Responses 后台任务（长任务防断线）",
+    gif: "GIF 动图（仅 gpt-image-2.6）",
     chat_completions: "聊天绘图接口（New API）",
     rinkoai: "RinkoAI NAI 接口",
     single_prompt: "单提示词节点",
@@ -48,7 +51,7 @@
     openai: {
       quality: ["", "auto", "low", "medium", "high", "standard", "hd"],
       response_format: ["", "b64_json", "url"],
-      output_format: ["", "png", "jpeg", "webp"],
+      output_format: ["", "png", "jpeg", "webp", "gif"],
       background: ["", "auto", "transparent", "opaque"],
       moderation: ["", "auto", "low"],
     },

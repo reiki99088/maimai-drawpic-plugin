@@ -68,3 +68,60 @@ def detect_image_format(image_bytes: bytes) -> str:
     if format_name in {"jpg", "jpeg", "png", "webp", "gif"}:
         return format_name
     return "png"
+
+
+MAX_GIF_FRAMES = 64
+_REVIEW_SHEET_FRAMES = 16
+_REVIEW_SHEET_EDGE = 2048
+
+
+def gif_frame_count(image_bytes: bytes) -> int:
+    """非 GIF 返回 0；GIF 返回帧数，帧数异常多时拒绝解码。"""
+
+    with PILImage.open(BytesIO(image_bytes)) as image:
+        if str(image.format or "").upper() != "GIF":
+            return 0
+        frames = int(getattr(image, "n_frames", 1) or 1)
+    if frames > MAX_GIF_FRAMES:
+        raise ValueError(f"GIF 帧数超过限制：最多 {MAX_GIF_FRAMES} 帧")
+    return frames
+
+
+def _rgba_frame(image) -> PILImage.Image:
+    return image.convert("RGBA") if image.mode in {"P", "LA", "RGBA"} else image.convert("RGB")
+
+
+def first_frame_png(image_bytes: bytes) -> bytes:
+    """上游编辑接口只接受静态图；GIF 源图取首帧转 PNG。"""
+
+    with PILImage.open(BytesIO(image_bytes)) as image:
+        image.seek(0)
+        frame = _rgba_frame(image)
+    output = BytesIO()
+    frame.save(output, format="PNG")
+    return output.getvalue()
+
+
+def review_image_payload(image_bytes: bytes) -> tuple[bytes, str]:
+    """审核模型只看静态图：GIF 拼成一张最多 16 帧的 PNG 联系表，避免只审首帧。"""
+
+    with PILImage.open(BytesIO(image_bytes)) as image:
+        if str(image.format or "").upper() != "GIF":
+            return image_bytes, detect_image_format(image_bytes)
+        total = min(int(getattr(image, "n_frames", 1) or 1), MAX_GIF_FRAMES)
+        step = max(1, -(-total // _REVIEW_SHEET_FRAMES))
+        frames = []
+        for index in range(0, total, step):
+            image.seek(index)
+            frames.append(_rgba_frame(image).convert("RGB"))
+    columns = min(len(frames), 4)
+    rows = -(-len(frames) // columns)
+    width, height = frames[0].size
+    scale = min(1.0, _REVIEW_SHEET_EDGE / max(width * columns, height * rows))
+    cell = (max(1, int(width * scale)), max(1, int(height * scale)))
+    sheet = PILImage.new("RGB", (cell[0] * columns, cell[1] * rows), "white")
+    for index, frame in enumerate(frames):
+        sheet.paste(frame.resize(cell), ((index % columns) * cell[0], (index // columns) * cell[1]))
+    output = BytesIO()
+    sheet.save(output, format="PNG")
+    return output.getvalue(), "png"

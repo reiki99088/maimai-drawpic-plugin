@@ -80,6 +80,9 @@ class ModelCatalogMixin:
                         extra_parameters=parse_key_value_options(self.config.openai.extra_parameters),
                         rewrite_prompt_to_english=self.config.openai.rewrite_prompt_to_english,
                         edit_size_mode=self.config.openai.edit_size_mode,
+                        request_mode=self.config.openai.request_mode,
+                        responses_main_model=self.config.openai.responses_main_model,
+                        responses_poll_interval_seconds=self.config.openai.responses_poll_interval_seconds,
                     )
                 )
 
@@ -116,6 +119,9 @@ class ModelCatalogMixin:
                         extra_parameters=instance_extra_parameters,
                         rewrite_prompt_to_english=instance.rewrite_prompt_to_english,
                         edit_size_mode=instance.edit_size_mode,
+                        request_mode=instance.request_mode,
+                        responses_main_model=instance.responses_main_model,
+                        responses_poll_interval_seconds=instance.responses_poll_interval_seconds,
                     )
                 )
         self._openai_routes_cache = routes

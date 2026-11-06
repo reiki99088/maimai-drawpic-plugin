@@ -1,6 +1,7 @@
 """OpenAI / New API 兼容模式与聊天绘图请求定义。"""
 
 from typing import Any, Dict, List, Literal, Optional
+import re
 
 
 OpenAICompatibilityMode = Literal["auto", "images_api", "chat_completions", "rinkoai"]
@@ -85,3 +86,52 @@ def build_newapi_chat_payload(
     if n > 1:
         payload["n"] = n
     return payload
+
+
+_GIF_MODEL_PATTERN = re.compile(r"^gpt-image-2\.6(?:$|[-_.])", re.IGNORECASE)
+GIF_MODE_UNSUPPORTED_REASON = "GIF 动图需要 Images API 或 Responses 后台模式，聊天绘图/RinkoAI 接口无法输出动图"
+
+
+def supports_gif_output(upstream_model: str) -> bool:
+    """目前只有 gpt-image-2.6 系列支持 output_format=gif。"""
+
+    return bool(_GIF_MODEL_PATTERN.match(upstream_model.strip()))
+
+
+OpenAIRequestMode = Literal["images", "responses_background"]
+RESPONSES_IMAGE_INSTRUCTIONS = (
+    "Call image_generation exactly once, passing the user's prompt verbatim; do not rewrite, translate or add text."
+)
+RESPONSES_PENDING_STATUSES = frozenset({"queued", "in_progress"})
+RESPONSES_FAILED_STATUSES = frozenset({"failed", "cancelled", "incomplete"})
+# 图片工具只接受图像参数；顶层请求字段与流式参数不得混入 tools[]。
+_RESPONSES_TOOL_EXCLUDED = frozenset({"model", "prompt", "n", "response_format", "stream", "partial_images", "user"})
+
+
+def normalize_openai_request_mode(value: Any) -> str:
+    return "responses_background" if str(value or "").strip().lower() == "responses_background" else "images"
+
+
+def build_responses_image_payload(
+    *,
+    main_model: str,
+    image_model: str,
+    prompt: str,
+    tool_parameters: Dict[str, Any],
+    source_image_data_urls: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """工具内 background 是透明度参数，顶层 background=True 才是后台模式，二者不得混用。"""
+
+    tool = {key: value for key, value in tool_parameters.items() if key not in _RESPONSES_TOOL_EXCLUDED}
+    tool.update({"type": "image_generation", "model": image_model})
+    content: List[Dict[str, Any]] = [{"type": "input_text", "text": prompt}]
+    content.extend({"type": "input_image", "image_url": data_url} for data_url in source_image_data_urls or [])
+    return {
+        "model": main_model,
+        "background": True,
+        "store": True,
+        "instructions": RESPONSES_IMAGE_INSTRUCTIONS,
+        "input": [{"role": "user", "content": content}],
+        "tools": [tool],
+        "tool_choice": {"type": "image_generation"},
+    }

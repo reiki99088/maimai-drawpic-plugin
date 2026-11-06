@@ -10,17 +10,30 @@ import mimetypes
 import re
 import time
 
-from .requests import generation_submission
+from .requests import generation_submission, query_submitted_task, submitted_task
 from ..media.collection import bounded_results, decode_result_base64
 from ..http import sanitized_log_args, sanitize_provider_text
-from ..media.images import detect_image_dimensions, detect_mime_type, validate_image_bytes
+from ..media.images import (
+    detect_image_dimensions,
+    detect_image_format,
+    detect_mime_type,
+    first_frame_png,
+    gif_frame_count,
+    validate_image_bytes,
+)
 from ..media.downloads import download_image
-from ...domain.errors import ProviderError, ProviderOutcomeUnknown, ProviderRequestError
+from ...domain.errors import ProviderError, ProviderOutcomeUnknown, ProviderRequestError, ProviderResultError
 from ..http import HttpProxySettings, read_response_json, read_response_text
+from ...domain.models.animation import GIF_INCOMPATIBLE_PARAMETERS, AnimationOptions
 from ...domain.models.openai_profiles import (
+    GIF_MODE_UNSUPPORTED_REASON,
+    RESPONSES_FAILED_STATUSES,
+    RESPONSES_PENDING_STATUSES,
     build_newapi_chat_payload,
+    build_responses_image_payload,
     is_endpoint_unsupported,
     normalize_openai_mode,
+    normalize_openai_request_mode,
     select_auto_modes,
     uses_newapi_image_chat,
 )
@@ -71,6 +84,10 @@ class OpenaiImage:
         default_size: str = "1024x1024",
         model_size_overrides: dict[str, str] | None = None,
         edit_size_mode: str = "source",
+        request_mode: str = "images",
+        responses_main_model: str = "gpt-5.4-mini",
+        responses_poll_interval_seconds: float = 3.0,
+        animation: AnimationOptions | None = None,
         quality: str = "",
         response_format: str = "",
         output_format: str = "",
@@ -94,6 +111,11 @@ class OpenaiImage:
         }
         # configured：图生图不再按源图比例推断尺寸，只用默认分辨率（含按模型覆盖）。
         self.edit_size_mode = "configured" if str(edit_size_mode).strip().lower() == "configured" else "source"
+        # responses_background：Responses 后台任务提交后轮询，避免代理掐断长时间无数据的请求。
+        self.request_mode = normalize_openai_request_mode(request_mode)
+        self.responses_main_model = str(responses_main_model or "").strip() or "gpt-5.4-mini"
+        self.responses_poll_interval_seconds = max(float(responses_poll_interval_seconds), 0.0)
+        self.animation = animation
         self.quality = quality.strip()
         self.response_format = response_format.strip()
         self.output_format = output_format.strip()
@@ -124,12 +146,10 @@ class OpenaiImage:
                         build_newapi_chat_payload(prompt, model, self._resolve_n(n), self.extra_parameters),
                         "New API Chat Completion",
                     )
+                elif self._uses_responses_background(model):
+                    images = await self._request_responses_images(prompt, model, [], n)
                 else:
-                    response = await self._post_json(
-                        url=self._build_api_url("images/generations"),
-                        payload=self._build_images_generation_payload(prompt=prompt, model=model, n=n),
-                    )
-                    images = await self._extract_images_auto(response)
+                    images = await self._request_generation_images(prompt, model, n)
                 self._remember_auto_mode(model, "draw", mode)
                 return images
             except OpenAIRequestError as exc:
@@ -170,6 +190,8 @@ class OpenaiImage:
                         ),
                         "New API Chat Completion",
                     )
+                elif self._uses_responses_background(model):
+                    images = await self._request_responses_images(prompt, model, image_bytes_list, n)
                 else:
                     response = await self._post_edit_form_with_fallback(
                         url=self._build_api_url("images/edits"),
@@ -179,6 +201,7 @@ class OpenaiImage:
                         n=n,
                     )
                     images = await self._extract_images_auto(response)
+                    await self._require_animated(images)
                 self._remember_auto_mode(model, "edit_image", mode)
                 return images
             except OpenAIRequestError as exc:
@@ -232,7 +255,7 @@ class OpenaiImage:
 
         preferred = self._resolve_generation_modes(model)
         if preferred == ["rinkoai"] or not self._is_auto_mode(model):
-            return preferred
+            return self._animation_modes(preferred)
         await self._load_model_endpoint_types()
         modes = select_auto_modes(model, self._model_endpoint_types.get(model.strip()))
         cached = self._successful_auto_modes.get((task_type, model))
@@ -240,6 +263,16 @@ class OpenaiImage:
             modes.remove(cached)
             modes.insert(0, cached)
         self._log_info("OpenAI 自动兼容选择: model=%s task_type=%s modes=%s", model, task_type, modes)
+        return self._animation_modes(modes)
+
+    def _animation_modes(self, modes: List[str]) -> List[str]:
+        """动图只能走 Images API（含 Responses 后台）；聊天协议无法输出 GIF，请求前拒绝。"""
+
+        if self.animation is None:
+            return modes
+        modes = [mode for mode in modes if mode == "images_api"]
+        if not modes:
+            raise ValueError(GIF_MODE_UNSUPPORTED_REASON)
         return modes
 
     def _remember_auto_mode(self, model: str, task_type: str, mode: str) -> None:
@@ -344,6 +377,7 @@ class OpenaiImage:
             "image/jpeg": "jpg",
             "image/png": "png",
             "image/webp": "webp",
+            "image/gif": "gif",
         }
         extension = extension_map.get(mime_type, "png")
         return f"source.{extension}"
@@ -483,6 +517,8 @@ class OpenaiImage:
         if self.moderation:
             payload["moderation"] = self.moderation
         payload.update(self.extra_parameters)
+        if self.animation is not None:
+            payload.update(self.animation.request_fields())
         payload.update({"model": model, "prompt": prompt, "n": self._resolve_n(n)})
         self._validate_image_parameters(payload, model)
         return payload
@@ -493,13 +529,16 @@ class OpenaiImage:
         if payload.pop("stream", False):
             raise ValueError("插件当前不支持流式图片响应，请移除 stream=true")
         payload.pop("partial_images", None)
+        if payload.get("output_format") == "gif":
+            for key in GIF_INCOMPATIBLE_PARAMETERS:
+                payload.pop(key, None)
         if not (self._is_gpt_image_model(model) or model.strip().lower() == "chatgpt-image-latest"):
             return
         # GPT Image 直接返回 Base64，response_format 是旧模型参数。
         payload.pop("response_format", None)
         if model.strip().lower().startswith("gpt-image-2"):
             payload.pop("input_fidelity", None)
-        if payload.get("output_format", "png") == "png":
+        if payload.get("output_format", "png") in {"png", "gif"}:
             payload.pop("output_compression", None)
         if payload.get("background") == "transparent" and payload.get("output_format") == "jpeg":
             raise ValueError("OpenAI 透明背景必须使用 png 或 webp 输出格式")
@@ -618,6 +657,8 @@ class OpenaiImage:
             else self._resolve_source_edit_size(model, image_bytes_list[0])
         )
         size_candidates = [source_size, default_size] if source_size and source_size != default_size else [default_size]
+        size_candidates = self._with_gif_size_fallback(size_candidates)
+        image_bytes_list = [await asyncio.to_thread(self._upstream_source_bytes, raw) for raw in image_bytes_list]
 
         last_error = None
         for size_index, size in enumerate(size_candidates):
@@ -680,7 +721,7 @@ class OpenaiImage:
                     last_error = exc
                     # 只针对明确标记的参数校验错误调整表单；不能因鉴权、
                     # 额度或服务错误重发，更不能默默丢掉多图中的部分源图。
-                    if exc.status in {400, 422} and exc.param == "size":
+                    if self._is_size_rejection(exc):
                         break
                     if (
                         exc.status in {400, 422}
@@ -692,6 +733,276 @@ class OpenaiImage:
         if last_error is not None:
             raise last_error
         raise RuntimeError("图片编辑表单提交失败")
+
+    def _with_gif_size_fallback(self, sizes: list[str]) -> list[str]:
+        """GIF 按帧拼图生成，固定尺寸可能放不下全部帧；受理前被拒时最后退回 auto。"""
+
+        if self.animation is None or "auto" in sizes:
+            return sizes
+        return [*sizes, "auto"]
+
+    def _is_size_rejection(self, exc: OpenAIRequestError) -> bool:
+        """只有明确的尺寸参数错误才换尺寸；此时上游尚未受理，重发不会重复生成。"""
+
+        if exc.status not in {400, 422}:
+            return False
+        if exc.param == "size" or exc.param.endswith(".size"):
+            return True
+        return self.animation is not None and "supported sheet" in str(exc).lower()
+
+    def _upstream_source_bytes(self, image_bytes: bytes) -> bytes:
+        """上游编辑接口只接受静态源图；GIF 源图取首帧。"""
+
+        if gif_frame_count(image_bytes) == 0:
+            return image_bytes
+        self._log_info("OpenAI 源图为 GIF，已取首帧作为参考图")
+        return first_frame_png(image_bytes)
+
+    async def _request_generation_images(self, prompt: str, model: str, n: int) -> list[bytes]:
+        payload = self._build_images_generation_payload(prompt=prompt, model=model, n=n)
+        sizes = self._with_gif_size_fallback([str(payload.get("size") or "")]) if payload.get("size") else [""]
+        for index, size in enumerate(sizes):
+            if size:
+                payload["size"] = size
+            try:
+                response = await self._post_json(url=self._build_api_url("images/generations"), payload=payload)
+            except OpenAIRequestError as exc:
+                if index + 1 == len(sizes) or not self._is_size_rejection(exc):
+                    raise
+                self._log_warning(
+                    "OpenAI 动图尺寸不可用，回退尺寸: model=%s size=%s fallback_size=%s", model, size, sizes[index + 1]
+                )
+                continue
+            images = await self._extract_images_auto(response)
+            await self._require_animated(images)
+            return images
+        raise RuntimeError("OpenAI 文生图请求未发出")
+
+    async def _require_animated(self, images: list[bytes]) -> None:
+        """请求了动图却拿到静态图时报结果错误，绝不悄悄当作成功发送。"""
+
+        if self.animation is None:
+            return
+        for raw in images:
+            frames = await asyncio.to_thread(gif_frame_count, raw)
+            if frames < 2:
+                image_format = await asyncio.to_thread(detect_image_format, raw)
+                raise ProviderResultError(
+                    f"已请求 GIF 动图，但上游返回了静态图片（format={image_format}）；未重新生成"
+                )
+
+    def _uses_responses_background(self, model: str) -> bool:
+        if self.request_mode != "responses_background":
+            return False
+        if self._is_gpt_image_model(model):
+            return True
+        self._log_info("OpenAI Responses 后台模式只用于 gpt-image 系列，本次直接请求: model=%s", model)
+        return False
+
+    async def _request_responses_images(
+        self,
+        prompt: str,
+        model: str,
+        image_bytes_list: list[bytes],
+        n: int,
+    ) -> list[bytes]:
+        """Responses 后台任务：提交只发一次，取得 ID 后只轮询同一任务，任何失败都不重新生成。"""
+
+        tool_parameters = self._build_images_generation_payload(prompt=prompt, model=model, n=n)
+        sizes = [str(tool_parameters.get("size") or "")]
+        if image_bytes_list and self.edit_size_mode != "configured":
+            source_size = await asyncio.to_thread(self._resolve_source_edit_size, model, image_bytes_list[0])
+            if source_size and source_size != sizes[0]:
+                sizes.insert(0, source_size)
+        sizes = self._with_gif_size_fallback([size for size in sizes if size]) or [""]
+        source_urls = [
+            await asyncio.to_thread(lambda raw=raw: self._source_image_data_url(self._upstream_source_bytes(raw)))
+            for raw in image_bytes_list
+        ]
+        url = self._build_api_url("responses")
+        accepted: dict[str, Any] | None = None
+        for index, size in enumerate(sizes):
+            if size:
+                tool_parameters["size"] = size
+            payload = build_responses_image_payload(
+                main_model=self.responses_main_model,
+                image_model=model,
+                prompt=prompt,
+                tool_parameters=tool_parameters,
+                source_image_data_urls=source_urls,
+            )
+            try:
+                accepted = await self._post_json(url=url, payload=payload)
+                break
+            except OpenAIRequestError as exc:
+                if index + 1 == len(sizes) or not self._is_size_rejection(exc):
+                    raise
+                self._log_warning(
+                    "OpenAI Responses 尺寸不可用，回退尺寸: model=%s size=%s fallback_size=%s",
+                    model,
+                    size,
+                    sizes[index + 1],
+                )
+        if accepted is None:
+            raise RuntimeError("OpenAI Responses 请求未发出")
+        response_id = str(accepted.get("id") or "").strip()
+        if not response_id:
+            raise ProviderResultError("OpenAI Responses 后台任务受理响应缺少 id；未重新提交生成")
+        self._log_info(
+            "OpenAI Responses 后台任务已受理: model=%s main_model=%s response_id=%s status=%s "
+            "source_image_count=%s animation=%s",
+            model,
+            self.responses_main_model,
+            response_id,
+            accepted.get("status"),
+            len(image_bytes_list),
+            self.animation.describe() if self.animation is not None else "none",
+        )
+        async with submitted_task("OpenAI Responses", response_id):
+            try:
+                final = accepted
+                if str(accepted.get("status") or "") in RESPONSES_PENDING_STATUSES:
+                    final = await self._poll_response(response_id, model)
+                images = await self._extract_responses_images(final, response_id, model)
+                for image_bytes in images:
+                    await asyncio.to_thread(validate_image_bytes, image_bytes)
+                await self._require_animated(images)
+                return images
+            except asyncio.CancelledError:
+                await self._cancel_response(response_id)
+                raise
+
+    async def _poll_response(self, response_id: str, model: str) -> dict[str, Any]:
+        """轮询后台任务，仅在状态变化时记录日志。"""
+
+        url = self._build_api_url(f"responses/{response_id}")
+        started_at = time.monotonic()
+        previous_status = "queued"
+        while True:
+            await asyncio.sleep(self.responses_poll_interval_seconds)
+            response = await query_submitted_task(
+                lambda: self._get_json(url),
+                poll_interval=self.responses_poll_interval_seconds,
+            )
+            status = str(response.get("status") or "").strip().lower()
+            if status != previous_status:
+                self._log_info(
+                    "OpenAI Responses 后台任务状态变化: model=%s response_id=%s from=%s to=%s duration=%.2fs",
+                    model,
+                    response_id,
+                    previous_status,
+                    status or "MISSING",
+                    time.monotonic() - started_at,
+                )
+                previous_status = status
+            if status == "completed":
+                return response
+            if status in RESPONSES_FAILED_STATUSES:
+                raise self._responses_terminal_error(response, response_id, model, status)
+            if status not in RESPONSES_PENDING_STATUSES:
+                raise RuntimeError(f"OpenAI Responses 后台任务 {response_id} 返回未知状态 {status or 'MISSING'}")
+
+    async def _get_json(self, url: str) -> dict[str, Any]:
+        """只读查询，不属于生成提交边界；断线由 query_submitted_task 恢复同一 ID。"""
+
+        start_time = time.time()
+        timeout = aiohttp.ClientTimeout(total=min(60, max(self.request_timeout_seconds, 5)))
+        async with aiohttp.ClientSession(timeout=timeout, **self.proxy_settings.aiohttp_session_kwargs()) as session:
+            async with session.get(
+                url,
+                headers=self._build_headers(),
+                allow_redirects=False,
+                **self.proxy_settings.aiohttp_request_kwargs(),
+            ) as response:
+                if response.status != 200:
+                    raise await self._http_error(response, url, time.time() - start_time)
+                result = await read_response_json(response)
+                if not isinstance(result, dict):
+                    raise RuntimeError("OpenAI Responses 查询返回了非对象 JSON")
+                return result
+
+    async def _cancel_response(self, response_id: str) -> None:
+        """超时或取消时尽力通知上游停止，失败只记日志，不影响原有的取消语义。"""
+
+        url = self._build_api_url(f"responses/{response_id}/cancel")
+        try:
+            timeout = aiohttp.ClientTimeout(total=5)
+            async with aiohttp.ClientSession(
+                timeout=timeout, **self.proxy_settings.aiohttp_session_kwargs()
+            ) as session:
+                async with session.post(
+                    url,
+                    headers=self._build_headers(with_json_content_type=True),
+                    json={},
+                    allow_redirects=False,
+                    **self.proxy_settings.aiohttp_request_kwargs(),
+                ) as response:
+                    self._log_info(
+                        "OpenAI Responses 后台任务已请求取消: response_id=%s status=%s", response_id, response.status
+                    )
+        except BaseException as exc:  # noqa: BLE001 - 取消通知不得吞掉或替换原始取消
+            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                raise
+            self._log_warning(
+                "OpenAI Responses 取消请求失败: response_id=%s type=%s", response_id, type(exc).__name__
+            )
+
+    def _responses_terminal_error(
+        self, response: dict[str, Any], response_id: str, model: str, status: str
+    ) -> ProviderError:
+        error = response.get("error") if isinstance(response.get("error"), dict) else {}
+        details = response.get("incomplete_details") if isinstance(response.get("incomplete_details"), dict) else {}
+        code = self._sanitize_text(error.get("code") or details.get("reason") or status)
+        message = self._sanitize_text(error.get("message") or details.get("reason") or "后台任务未成功完成")
+        failure = OpenAIRequestError(
+            400,
+            code,
+            "",
+            f"OpenAI Responses 后台任务终止: model={model} response_id={response_id} status={status} message={message}",
+        )
+        if failure.rejected:
+            # 审核拒绝保留分类；submitted_task 会原样抛出，任务终止为 rejected。
+            failure.remote_task_id = response_id
+            return failure
+        return ProviderResultError(str(failure))
+
+    @bounded_results
+    async def _extract_responses_images(self, response: dict[str, Any], response_id: str, model: str) -> list[bytes]:
+        """读取 image_generation_call 的 Base64 结果，并记录脱敏后的改写提示词。"""
+
+        output = response.get("output")
+        images: list[bytes] = []
+        text_parts: list[str] = []
+        for item in output if isinstance(output, list) else []:
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") == "message":
+                for part in item.get("content") or []:
+                    if isinstance(part, dict) and isinstance(part.get("text"), str):
+                        text_parts.append(part["text"])
+                continue
+            if item.get("type") != "image_generation_call":
+                continue
+            if str(item.get("status") or "") == "failed":
+                raise self._responses_terminal_error(
+                    {"error": item.get("error") or {}}, response_id, model, "failed"
+                )
+            revised_prompt = item.get("revised_prompt")
+            if isinstance(revised_prompt, str) and revised_prompt:
+                self._log_info(
+                    "OpenAI Responses 图片工具提示词: response_id=%s revised_prompt=%s",
+                    response_id,
+                    sanitize_provider_text(revised_prompt, self.api_key, max_chars=300),
+                )
+            result = item.get("result")
+            if isinstance(result, str) and result:
+                images.append(await asyncio.to_thread(decode_result_base64, result))
+        if not images:
+            reply = self._sanitize_text("".join(text_parts).strip()) or "无"
+            raise ProviderResultError(
+                f"OpenAI Responses 后台任务 {response_id} 已完成但没有图片结果（模型回复：{reply}）；未重新生成"
+            )
+        return images
 
     @bounded_results
     async def _extract_images(self, response: dict[str, Any]) -> list[bytes]:

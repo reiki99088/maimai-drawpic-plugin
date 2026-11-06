@@ -2,6 +2,25 @@
 
 from typing import Any
 
+ANIMATION_TOOL_PROPERTIES: dict[str, Any] = {
+    "animated": {
+        "type": "boolean",
+        "description": "可选，仅当用户明确要求动图/GIF/会动的图时传 true；只有 gpt-image-2.6 系列模型支持，其余模型会返回原因",
+    },
+    "frame_count": {
+        "type": "integer",
+        "minimum": 2,
+        "maximum": 16,
+        "description": "可选，动图帧数 2～16，仅 animated=true 时有效；不填使用上游默认 9 帧",
+    },
+    "frame_duration_ms": {
+        "type": "integer",
+        "minimum": 20,
+        "maximum": 2000,
+        "description": "可选，动图每帧毫秒 20～2000，仅 animated=true 时有效；不填使用上游默认 200",
+    },
+}
+
 DRAW_TOOL_PARAMETERS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
@@ -18,6 +37,7 @@ DRAW_TOOL_PARAMETERS_SCHEMA: dict[str, Any] = {
             "type": "string",
             "description": "可选，本次绘图的反向提示词；支持独立反向字段的平台会单独传递，否则合并到正向提示词",
         },
+        **ANIMATION_TOOL_PROPERTIES,
     },
     "required": ["prompt"],
 }
@@ -47,6 +67,7 @@ EDIT_IMAGE_TOOL_PARAMETERS_SCHEMA: dict[str, Any] = {
             "type": "string",
             "description": "可选，本次图生图的反向提示词；会与平台默认反向词合并",
         },
+        **ANIMATION_TOOL_PROPERTIES,
     },
     "required": ["prompt"],
 }
@@ -89,6 +110,7 @@ STYLED_DRAW_TOOL_PARAMETERS_SCHEMA: dict[str, Any] = {
             "type": "string",
             "description": "可选，直接提供真实源图片 Base64 或 data URL",
         },
+        **ANIMATION_TOOL_PROPERTIES,
     },
     "required": [],
 }

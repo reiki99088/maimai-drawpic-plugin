@@ -9,6 +9,7 @@ from ..chat.message_images import (
     decode_image_base64,
     find_source_image_inputs,
 )
+from ...domain.models.animation import parse_animation_options
 from ...infrastructure.observability.redaction import outward_error
 from .schemas import DRAW_STYLES_TOOL_PARAMETERS_SCHEMA, STYLED_DRAW_TOOL_PARAMETERS_SCHEMA
 
@@ -53,6 +54,7 @@ class StyleToolMixin:
             "有风格需求时必须先调用 draw_styles，依据 style_details.description 与用户需求做语义匹配，"
             "再把精确名称填入 style。"
             "有真实源图片时自动图生图；没有源图片时文生图。style 不填时保持普通 draw/edit_image 行为。"
+            "用户明确要动图/GIF 时传 animated=true。"
         ),
         parameters=STYLED_DRAW_TOOL_PARAMETERS_SCHEMA,
     )
@@ -64,12 +66,16 @@ class StyleToolMixin:
         source_message_id: str = "",
         source_image_base64: str = "",
         user_id: str = "",
+        animated: Any = False,
+        frame_count: Any = None,
+        frame_duration_ms: Any = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """使用全平台风格模板创建或编辑图片。"""
 
         runtime_context: dict[str, str] = {}
         try:
+            animation = parse_animation_options(animated, frame_count, frame_duration_ms, lenient=True)
             context = self._extract_invocation_context(kwargs=kwargs, llm_user_id=user_id)
             live_context = await self._require_stream_service().resolve_live_stream_context(
                 stream_id=context["stream_id"],
@@ -123,6 +129,7 @@ class StyleToolMixin:
                 defer_prompt_review=True,
                 prompt=resolved_prompt.positive_prompt,
                 request_negative_prompt=resolved_prompt.negative_prompt,
+                animation=animation,
                 stream_id=runtime_context["stream_id"],
                 source_image_bytes_list=source_image_bytes_list,
                 source_image_urls=source_image_urls,

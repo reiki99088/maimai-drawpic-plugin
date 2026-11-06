@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from ..routing import ProviderName
+from ...domain.models.animation import AnimationOptions
 
 
 @dataclass(frozen=True, slots=True)
@@ -13,3 +14,4 @@ class ImageRequestAttempt:
     novelai_mode: str = ""
     novelai_artist_tags: str = ""
     is_fallback: bool = False
+    animation: AnimationOptions | None = None

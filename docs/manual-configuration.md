@@ -55,6 +55,9 @@
         "model_size_overrides": ["gpt-image-1=1024x1536"],
         "quality": "",
         "output_format": "",
+        "request_mode": "images",
+        "responses_main_model": "gpt-5.4-mini",
+        "responses_poll_interval_seconds": 3,
         "extra_parameters": []
       }
     }
@@ -68,6 +71,7 @@
 - `codex` 实例没有 API Key，常用字段示例：`{"enabled": true, "access_scope": "admin", "models": ["gpt-6.1-sol"], "reasoning_effort": "medium", "codex_path": "", "codex_home": "", "task_timeout_seconds": 900, "max_concurrent_tasks": 1, "max_queued_tasks": 3, "queue_timeout_seconds": 1200, "max_reference_downloads": 8, "allow_proxy_fake_ip": true, "resume_enabled": true, "thread_retention_days": 7, "deliver_all_images": false}`。`access_scope` 只能是 `admin` 或 `all`；会话索引与参考图保存在标准数据目录的 `codex_agent/` 下，不要手动编辑其中的 `threads.json`。
 - `config` 是该平台类型的字段，不能把另一种平台的参数混入。省略的已知字段会使用该平台默认值；已有文件通常已写出完整字段。
 - 模型列表仅填写真实模型 ID，不再使用 `别名=模型ID`；分辨率覆盖也使用真实模型 ID。
+- OpenAI 的 `request_mode` 只能是 `images` 或 `responses_background`，其他值按 `images` 读取；`responses_poll_interval_seconds` 超出 1～30 时自动限制到范围内。说明见[平台配置说明](platforms.md#高级配置)。
 - NovelAI 同样只维护一个 `models` 列表，可混合官方预设与兼容服务自定义 ID；旧 `custom_models` 加载时合并去重，保存后移除此旧字段。
 - 要在通用配置中指定模型，应使用工作台显示的完整名称，例如 `日常创作/gpt-image-2.5`。
 

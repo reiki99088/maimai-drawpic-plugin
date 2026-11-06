@@ -18,6 +18,7 @@ from ...infrastructure.storage.tasks import DrawTaskStore
 from ...domain.task_errors import ModelAccessError, TaskRequestError, task_error
 from ..drawing.admission import update_task_owned
 from .preferences import validate_preferences
+from ...domain.models.animation import parse_animation_options
 
 
 def validate_task_id(task_id: str) -> None:
@@ -140,6 +141,9 @@ class WorkspaceTaskService:
         novelai_mode: str = "",
         novelai_artist_tags: str | None = None,
         require_existing_stream: bool = False,
+        animated: bool = False,
+        frame_count: int | None = None,
+        frame_duration_ms: int | None = None,
     ) -> Dict[str, Any]:
         if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 16000:
             raise ValueError("提示词应为 1～16000 个字符")
@@ -166,10 +170,13 @@ class WorkspaceTaskService:
         if novelai_artist_tags is not None:
             options["novelai_artist_tags"] = novelai_artist_tags
         options = validate_preferences(options)
+        animation = parse_animation_options(animated, frame_count, frame_duration_ms)
         signature_values = [prompt, model, negative_prompt, style, task_type, stream_id, source_ids, source_images]
         # 保留旧请求的签名；只有显式覆盖新参数时才扩展签名，不能让升级破坏幂等恢复。
         if any(options.values()) or novelai_artist_tags is not None:
             signature_values.append(options)
+        if animation is not None:
+            signature_values.append(animation.signature())
         signature = await asyncio.to_thread(
             lambda: sha256(
                 json.dumps(
@@ -219,6 +226,12 @@ class WorkspaceTaskService:
             capability = router.evaluate_model_task_capability(resolved_model, task_type)
             if not capability.allowed:
                 raise ValueError(capability.reason)
+            if animation is not None:
+                animation_capability = router.evaluate_model_animation_capability(
+                    resolved_model, options["openai_compatibility_mode"]
+                )
+                if not animation_capability.allowed:
+                    raise ValueError(animation_capability.reason)
             router.validate_source_image_count(resolved_model, len(images))
             await asyncio.to_thread(router.validate_forced_command_task, resolved_model, task_type)
             if images:
@@ -247,6 +260,7 @@ class WorkspaceTaskService:
                     requested_openai_compatibility_mode=options["openai_compatibility_mode"],
                     requested_novelai_mode=options["novelai_mode"],
                     requested_novelai_artist_tags=options.get("novelai_artist_tags"),
+                    animation=animation,
                     **({"user_id": context["user_id"], "group_id": context["group_id"],
                         "platform_name": context["platform"]} if context else {}),
                     source_image_bytes_list=images,
@@ -263,6 +277,7 @@ class WorkspaceTaskService:
                     resolved_openai_mode=options["openai_compatibility_mode"],
                     novelai_mode=options["novelai_mode"],
                     novelai_artist_tags=options.get("novelai_artist_tags", ""),
+                    animation=animation,
                     provider_name=router.get_model_provider(resolved_model),
                     request_negative_prompt=resolved_style.negative_prompt,
                     source_image_bytes_list=images,

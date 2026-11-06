@@ -61,6 +61,13 @@ Images API 的生成、编辑能力取决于模型。RinkoAI NAI 目前只支持
 
 ### 高级配置
 
+**请求方式**（`request_mode`）只对图片接口模式下的 gpt-image 模型生效：
+
+- `images`（默认）：直接请求 `/images/generations`、`/images/edits`，一次 HTTP 等到出图。
+- `responses_background`：经 `/responses` 以 `background=true` 提交，由主模型（`responses_main_model`，默认 `gpt-5.4-mini`）调用 `image_generation` 工具出图，插件每隔 `responses_poll_interval_seconds`（默认 3 秒，限制 1～30）查询一次。每次 HTTP 都很短，适合高质量模型常要两三分钟、而代理或中转会掐断长时间无数据连接的环境。后台模式要求 `store=true`，结果在服务端保留约 10 分钟；总等待仍受工作台“请求超时”限制，长任务建议调到 300 秒。受理后断线只重查同一任务，超时或取消时会尽力通知上游取消，绝不重新提交。主模型会额外消耗少量文本 token。
+
+**GIF 动图**：gpt-image-2.6 系列支持 `output_format=gif`，帧数 2～16（默认 9）、每帧 20～2000 毫秒（默认 200）。所有帧排在一张上限 3840 像素的拼图上，大尺寸配多帧会被拒绝，插件此时在受理前改用 `size=auto` 重试。GIF 不支持 `partial_images`、`output_compression`、`prompt_rewriter`，请求时自动移除；聊天绘图接口与 RinkoAI 不能出动图。建议通过工具或 API 的 `animated` 参数按次请求，而不是把平台默认输出格式改成 gif。
+
 `images_api` 使用图片生成/编辑端点；New API 标准聊天绘图选 `chat_completions`，源图通过 `messages[].content[].image_url` 传入。`rinkoai` 面向 RinkoAI NAI；旧 `novelai_images_api` 读取为其别名。`auto` 优先模型端点元信息，再按模型族选择。可调整尺寸、输出格式、背景、质量、模型尺寸覆盖及额外参数；以实际模型为准。
 
 ### 常见错误

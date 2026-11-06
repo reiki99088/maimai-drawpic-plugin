@@ -60,7 +60,7 @@ async def read_image(rpc: DrawingRPC, task_id: str, index: int, max_bytes: int) 
             if expected is not None and identity != expected:
                 raise ValueError("图片分块来源或大小改变")
             expected = identity
-            if not isinstance(identity[1], str) or identity[1] not in {"image/png", "image/jpeg", "image/webp"}:
+            if not isinstance(identity[1], str) or identity[1] not in {"image/png", "image/jpeg", "image/webp", "image/gif"}:
                 raise ValueError("图片格式无效")
             if not isinstance(identity[2], str) or not identity[2]:
                 raise ValueError("图片来源标记无效")

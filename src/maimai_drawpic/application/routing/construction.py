@@ -10,6 +10,7 @@ from ...infrastructure.providers.siliconflow import SiliconFlowImage
 from ...infrastructure.providers.volcengine import VolcengineImage
 from ...infrastructure.providers.zhipu import ZhipuImage
 from ...domain.configuration.models import OpenAICompatibilityMode
+from ...domain.models.animation import AnimationOptions
 from ...infrastructure.http import HttpProxySettings
 from ...domain.parameters import parse_key_value_options, parse_model_value_overrides
 from .types import ImageProvider, OpenAIModelRoute, ProviderName, RoutedOpenAIImage, _DOMESTIC_PROXY_BYPASS_PROVIDERS
@@ -116,7 +117,12 @@ class ProviderConstructionMixin:
             skip_image_url_ip_check=self.config.general.skip_image_url_ip_check,
         )
 
-    def create_openai_provider(self, compatibility_mode: OpenAICompatibilityMode, model: str = "") -> ImageProvider:
+    def create_openai_provider(
+        self,
+        compatibility_mode: OpenAICompatibilityMode,
+        model: str = "",
+        animation: AnimationOptions | None = None,
+    ) -> ImageProvider:
         """创建 OpenAI 图片提供商实例。"""
 
         route = self.resolve_openai_model_route(model)
@@ -139,6 +145,9 @@ class ProviderConstructionMixin:
                 extra_parameters=parse_key_value_options(self.config.openai.extra_parameters),
                 rewrite_prompt_to_english=self.config.openai.rewrite_prompt_to_english,
                 edit_size_mode=self.config.openai.edit_size_mode,
+                request_mode=self.config.openai.request_mode,
+                responses_main_model=self.config.openai.responses_main_model,
+                responses_poll_interval_seconds=self.config.openai.responses_poll_interval_seconds,
             )
 
         provider = OpenaiImage(
@@ -150,6 +159,10 @@ class ProviderConstructionMixin:
             default_size=route.default_size,
             model_size_overrides=route.model_size_overrides,
             edit_size_mode=route.edit_size_mode,
+            request_mode=route.request_mode,
+            responses_main_model=route.responses_main_model,
+            responses_poll_interval_seconds=route.responses_poll_interval_seconds,
+            animation=animation,
             quality=route.quality,
             response_format=route.response_format,
             output_format=route.output_format,
@@ -337,6 +350,7 @@ class ProviderConstructionMixin:
         request_negative_prompt: str = "",
         novelai_mode: str = "",
         novelai_artist_tags: str = "",
+        animation: AnimationOptions | None = None,
     ) -> tuple[ImageProvider, ProviderName]:
         """根据模型解析并创建对应的平台实例，带实例缓存避免重复构造。"""
 
@@ -351,8 +365,13 @@ class ProviderConstructionMixin:
             normalized_model,
             openai_compatibility_mode.strip() if provider_type == "openai" else "",
         )
+        if animation is not None and provider_type != "openai":
+            raise ValueError(f"模型 {model} 不支持 GIF 动图输出")
         use_cache = (
-            not normalized_negative_prompt and not normalized_novelai_mode and not normalized_novelai_artist_tags
+            not normalized_negative_prompt
+            and not normalized_novelai_mode
+            and not normalized_novelai_artist_tags
+            and animation is None
         )
         if use_cache:
             cached_provider = self._provider_cache.get(cache_key)
@@ -385,6 +404,7 @@ class ProviderConstructionMixin:
             provider = self.create_openai_provider(
                 self.resolve_openai_compatibility_mode(openai_compatibility_mode, model),
                 model,
+                animation,
             )
         else:
             raise RuntimeError(f"模型未归属于任何已配置提供商：{model}")

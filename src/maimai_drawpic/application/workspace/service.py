@@ -91,6 +91,7 @@ class WorkspaceService:
                 except ValueError as exc:
                     api_edit_reason = str(exc)
             maximum = router.get_max_source_images(model)
+            animation = router.evaluate_model_animation_capability(model)
             models.append({
                 **router.describe_model(model),
                 "draw": draw.allowed,
@@ -100,6 +101,8 @@ class WorkspaceService:
                 "api_edit_image": edit.allowed and not api_edit_reason,
                 "api_edit_reason": api_edit_reason,
                 "max_source_images": min(8, maximum) if maximum is not None else 8,
+                "animated_gif": animation.allowed,
+                "animated_gif_reason": animation.reason,
             })
         return {
             "models": models,

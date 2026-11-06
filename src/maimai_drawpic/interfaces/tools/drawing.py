@@ -6,6 +6,7 @@ from maibot_sdk import Tool
 from typing import Any
 
 from ..chat.message_images import decode_image_base64, find_source_image_inputs
+from ...domain.models.animation import parse_animation_options
 from .schemas import DRAW_TOOL_PARAMETERS_SCHEMA, EDIT_IMAGE_TOOL_PARAMETERS_SCHEMA
 
 
@@ -16,7 +17,8 @@ class DrawingToolMixin:
         "draw",
         description=(
             "根据纯文本提示创建独立的后台绘图任务，并在完成后发送到当前聊天流；可选传入反向提示词。"
-            "用户要求修改、编辑、重绘已有图片时不要调用本工具，应调用 edit_image"
+            "用户要求修改、编辑、重绘已有图片时不要调用本工具，应调用 edit_image。"
+            "用户明确要动图/GIF 时传 animated=true"
         ),
         parameters=DRAW_TOOL_PARAMETERS_SCHEMA,
     )
@@ -26,6 +28,9 @@ class DrawingToolMixin:
         user_id: str = "",
         model: str = "",
         negative_prompt: str = "",
+        animated: Any = False,
+        frame_count: Any = None,
+        frame_duration_ms: Any = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """创建图片。"""
@@ -39,6 +44,7 @@ class DrawingToolMixin:
             return {"success": False, "message": "提示词不能为空"}
 
         try:
+            animation = parse_animation_options(animated, frame_count, frame_duration_ms, lenient=True)
             context = self._extract_invocation_context(kwargs=kwargs, llm_user_id=user_id)
             return await self._start_background_image_request(
                 defer_prompt_review=True,
@@ -46,6 +52,7 @@ class DrawingToolMixin:
                 stream_id=context["stream_id"],
                 requested_model=model.strip(),
                 request_negative_prompt=negative_prompt.strip(),
+                animation=animation,
                 user_id=context["user_id"],
                 group_id=context["group_id"],
                 platform_name=context["platform"],
@@ -69,7 +76,7 @@ class DrawingToolMixin:
             "基于当前聊天中的真实图片执行图生图编辑；仅当用户明确要求修改、编辑、重绘已有图片时调用。"
             "如果用户回复/引用了一张图片，直接调用本工具，插件会从引用消息中提取真实图片。"
             "每次调用会创建独立后台任务；找不到真实图片或平台不支持图片编辑时返回原因，"
-            "并按插件配置决定是否直接向聊天流发送失败通知"
+            "并按插件配置决定是否直接向聊天流发送失败通知。用户明确要把图改成动图/GIF 时传 animated=true"
         ),
         parameters=EDIT_IMAGE_TOOL_PARAMETERS_SCHEMA,
     )
@@ -81,6 +88,9 @@ class DrawingToolMixin:
         source_image_base64: str = "",
         model: str = "",
         negative_prompt: str = "",
+        animated: Any = False,
+        frame_count: Any = None,
+        frame_duration_ms: Any = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """编辑图片。"""
@@ -92,6 +102,12 @@ class DrawingToolMixin:
                 user_id=user_id,
             )
             return {"success": False, "message": "提示词不能为空"}
+        try:
+            animation = parse_animation_options(animated, frame_count, frame_duration_ms, lenient=True)
+        except ValueError as exc:
+            reason = outward_error(self, exc)
+            await self._send_invocation_failure_notice(reason=reason, kwargs=kwargs, user_id=user_id)
+            return {"success": False, "message": reason}
 
         try:
             draw_service = self._require_draw_service()
@@ -167,6 +183,32 @@ class DrawingToolMixin:
                         "请自然告知用户当前只能文生图，不能基于已有图片修改，或提示切换到支持图生图的模型。"
                     ),
                 }
+            # 动图能力要在找源图之前判断，否则不支持动图会被误报成缺少源图。
+            if animation is not None:
+                animation_capability = router.evaluate_model_animation_capability(check_model, resolved_openai_mode)
+                if not animation_capability.allowed:
+                    self.ctx.logger.warning(
+                        "edit_image 拒绝不支持动图的模型: model=%s provider=%s "
+                        "task_type=edit_image capability_source=%s reason=%s",
+                        check_model,
+                        provider_name,
+                        animation_capability.source,
+                        animation_capability.reason,
+                    )
+                    await self._send_draw_failure_notice(
+                        reason=animation_capability.reason,
+                        stream_id=normalized_stream_id,
+                        user_id=normalized_user_id,
+                        group_id=normalized_group_id,
+                        platform=platform_name,
+                    )
+                    return {
+                        "success": False,
+                        "message": (
+                            f"{animation_capability.reason}。请自然告知用户当前模型不能输出 GIF 动图，"
+                            "可以去掉动图要求，或切换到 gpt-image-2.6 系列模型。"
+                        ),
+                    }
             lookup_stream_id = await self._require_stream_service().resolve_live_stream_id(
                 stream_id=normalized_stream_id,
                 user_id=normalized_user_id,
@@ -202,6 +244,7 @@ class DrawingToolMixin:
                 requested_model=resolved_model,
                 requested_openai_compatibility_mode=resolved_openai_mode,
                 request_negative_prompt=negative_prompt.strip(),
+                animation=animation,
                 source_image_bytes_list=source_image_bytes_list,
                 source_image_urls=source_image_urls,
                 matched_message_id=matched_message_id,

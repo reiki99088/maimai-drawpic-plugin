@@ -7,6 +7,7 @@ from ...infrastructure.http import sanitize_provider_text
 from ...infrastructure.providers.codex import CodexRunRequest
 from .admission import update_task_owned, wait_for_admission
 from .types import ImageRequestAttempt
+from ...domain.models.animation import AnimationOptions
 
 
 class RequestPlanningMixin:
@@ -44,6 +45,7 @@ class RequestPlanningMixin:
         novelai_mode: str = "",
         novelai_artist_tags: str = "",
         is_fallback: bool = False,
+        animation: AnimationOptions | None = None,
     ) -> ImageRequestAttempt:
         """构建一次图片请求尝试的最终模型与提供商信息。"""
 
@@ -90,13 +92,26 @@ class RequestPlanningMixin:
             task_hint = "图生图" if task_type == "draw" else "文生图"
             raise ValueError(f"{capability.reason}。请改用{task_hint}，或切换到支持当前任务的模型")
 
+        resolved_mode = self.router.resolve_openai_compatibility_mode(openai_compatibility_mode, effective_model)
+        if animation is not None:
+            animation_capability = self.router.evaluate_model_animation_capability(effective_model, resolved_mode)
+            if not animation_capability.allowed:
+                self.ctx.logger.warning(
+                    "拒绝构建不支持动图的绘图尝试: model=%s provider=%s task_type=%s "
+                    "capability_source=%s reason=%s is_fallback=%s",
+                    effective_model,
+                    provider_name,
+                    task_type,
+                    animation_capability.source,
+                    animation_capability.reason,
+                    is_fallback,
+                )
+                raise ValueError(f"{animation_capability.reason}。请切换到支持 GIF 动图的模型，或去掉动图要求")
+
         return ImageRequestAttempt(
             model=effective_model,
             provider_name=provider_name,
-            openai_compatibility_mode=self.router.resolve_openai_compatibility_mode(
-                openai_compatibility_mode,
-                effective_model,
-            ),
+            openai_compatibility_mode=resolved_mode,
             novelai_mode=(
                 self.router.resolve_novelai_mode_for_model(effective_model, novelai_mode)
                 if provider_name == "novelai"
@@ -108,6 +123,7 @@ class RequestPlanningMixin:
                 else ""
             ),
             is_fallback=is_fallback,
+            animation=animation,
         )
 
     def _build_fallback_image_request_attempt(
@@ -120,6 +136,7 @@ class RequestPlanningMixin:
         novelai_mode: str = "",
         novelai_artist_tags: str = "",
         fallback_model: str = "",
+        animation: AnimationOptions | None = None,
     ) -> ImageRequestAttempt | None:
         """在首选模型失败后构建备选模型请求。"""
 
@@ -135,6 +152,7 @@ class RequestPlanningMixin:
                 novelai_mode=novelai_mode,
                 novelai_artist_tags=novelai_artist_tags,
                 is_fallback=True,
+                animation=animation,
             )
         except Exception as exc:
             self.ctx.logger.warning(
@@ -203,6 +221,7 @@ class RequestPlanningMixin:
             request_negative_prompt=provider_negative_prompt,
             novelai_mode=attempt.novelai_mode,
             novelai_artist_tags=attempt.novelai_artist_tags,
+            **({"animation": attempt.animation} if attempt.animation is not None else {}),
         )
 
         if provider_name == "codex":
@@ -217,12 +236,13 @@ class RequestPlanningMixin:
 
         if task_type == "edit_image":
             self.ctx.logger.info(
-                "开始绘图任务尝试: task_id=%s task_type=%s provider=%s model=%s is_fallback=%s source_image_count=%s source_image_bytes_lengths=%s matched_message_id=%s prompt=%s",
+                "开始绘图任务尝试: task_id=%s task_type=%s provider=%s model=%s is_fallback=%s animation=%s source_image_count=%s source_image_bytes_lengths=%s matched_message_id=%s prompt=%s",
                 task_id,
                 task_type,
                 provider_name,
                 attempt.model,
                 attempt.is_fallback,
+                attempt.animation.describe() if attempt.animation is not None else "none",
                 len(source_image_bytes_list),
                 [len(image_bytes) for image_bytes in source_image_bytes_list],
                 matched_message_id,
@@ -246,12 +266,13 @@ class RequestPlanningMixin:
             )
 
         self.ctx.logger.info(
-            "开始绘图任务尝试: task_id=%s task_type=%s provider=%s model=%s is_fallback=%s source_image_count=0 prompt=%s",
+            "开始绘图任务尝试: task_id=%s task_type=%s provider=%s model=%s is_fallback=%s animation=%s source_image_count=0 prompt=%s",
             task_id,
             task_type,
             provider_name,
             attempt.model,
             attempt.is_fallback,
+            attempt.animation.describe() if attempt.animation is not None else "none",
             provider_prompt[:120],
         )
         return await self.run_provider_call(

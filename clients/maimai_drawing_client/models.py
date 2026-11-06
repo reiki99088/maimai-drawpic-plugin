@@ -25,6 +25,10 @@ class DrawingRequest(TypedDict, total=False):
     openai_compatibility_mode: str
     novelai_mode: str
     novelai_artist_tags: Optional[str]
+    # 仅 gpt-image-2.6 系列支持；帧参数只在 animated=True 时有效，省略交给上游默认值。
+    animated: bool
+    frame_count: Optional[int]
+    frame_duration_ms: Optional[int]
 
 
 class DrawingTransportError(RuntimeError):

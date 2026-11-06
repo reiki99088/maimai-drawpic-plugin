@@ -7,6 +7,7 @@ from ...infrastructure.storage.retention import CacheCapacityError
 from ...domain.errors import ProviderError
 from ...domain.task_errors import provider_task_error, task_error
 from .admission import update_task_owned
+from ...domain.models.animation import AnimationOptions
 
 
 class ImageExecutionMixin:
@@ -22,6 +23,7 @@ class ImageExecutionMixin:
         openai_compatibility_mode: str = "",
         novelai_mode: str = "",
         novelai_artist_tags: str = "",
+        animation: AnimationOptions | None = None,
         request_negative_prompt: str = "",
         source_image_bytes_list: list[bytes] | None = None,
         source_image_urls: list[str] | None = None,
@@ -119,6 +121,7 @@ class ImageExecutionMixin:
                 openai_compatibility_mode=openai_compatibility_mode,
                 novelai_mode=novelai_mode,
                 novelai_artist_tags=novelai_artist_tags,
+                animation=animation,
             )
             await update_task_owned(
                 self.task_store,

@@ -17,6 +17,7 @@ from .execution import ImageExecutionMixin
 from .queries import TaskQueryMixin
 from .admission import persist_submission, tracked_submission, wait_for_admission
 from ...domain.task_errors import ModelAccessError, task_error
+from ...domain.models.animation import AnimationOptions
 
 
 class DrawService(
@@ -278,6 +279,7 @@ class DrawService(
         provider_name: str,
         novelai_mode: str = "",
         novelai_artist_tags: str = "",
+        animation: AnimationOptions | None = None,
         request_negative_prompt: str = "",
         user_id: str = "",
         group_id: str = "",
@@ -321,6 +323,7 @@ class DrawService(
             openai_compatibility_mode=resolved_openai_mode,
             novelai_mode=novelai_mode,
             novelai_artist_tags=novelai_artist_tags,
+            animation=animation,
         )
         self.router.validate_source_image_count(primary_attempt.model, len(normalized_source_images))
         if is_image_edit and self.router.get_image_edit_unsupported_reason(primary_attempt.model):
@@ -340,13 +343,14 @@ class DrawService(
         fallback_models = self.router.resolve_fallback_models(resolved_model)
         fallback_model = fallback_models[0] if fallback_models else ""
         self.ctx.logger.info(
-            "准备提交绘图任务: stream_id=%s task_type=%s provider=%s model=%s fallback_models=%s source_image_count=%s",
+            "准备提交绘图任务: stream_id=%s task_type=%s provider=%s model=%s fallback_models=%s source_image_count=%s animation=%s",
             stream_id,
             task_type,
             primary_attempt.provider_name,
             primary_attempt.model,
             fallback_models,
             len(normalized_source_images),
+            animation.describe() if animation is not None else "none",
         )
         unavailable = self.router.get_fallback_model_unavailable_reason(resolved_model)
         if unavailable:
@@ -377,6 +381,7 @@ class DrawService(
                 openai_compatibility_mode=resolved_openai_mode,
                 novelai_mode=novelai_mode,
                 novelai_artist_tags=novelai_artist_tags,
+                animation=animation,
                 request_negative_prompt=request_negative_prompt,
                 source_image_bytes_list=normalized_source_images,
                 source_image_urls=normalized_source_urls,

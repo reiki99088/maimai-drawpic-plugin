@@ -41,6 +41,9 @@ class OpenAIModelRoute:
     extra_parameters: dict[str, Any]
     rewrite_prompt_to_english: bool
     edit_size_mode: str = "source"
+    request_mode: str = "images"
+    responses_main_model: str = "gpt-5.4-mini"
+    responses_poll_interval_seconds: float = 3.0
 
 
 class ImageProvider(Protocol):

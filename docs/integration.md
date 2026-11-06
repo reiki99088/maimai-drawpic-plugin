@@ -204,8 +204,11 @@ async def resume_drawing(ctx, saved, wait_seconds=120):
 | `openai_compatibility_mode=""` | `auto`、`images_api`、`chat_completions`、`rinkoai`；空值在回传会话时继承会话偏好，否则跟随平台默认 |
 | `novelai_mode=""` | `anime`、`furry`、`background`；空值的继承规则同上 |
 | `novelai_artist_tags=None` | `None` 在回传会话时继承会话画师偏好；文本覆盖，空文本跳过会话画师偏好并跟随平台默认 |
+| `animated=False` | 布尔值；`True` 请求 GIF 动图，仅 gpt-image-2.6 系列（图片接口或 Responses 后台任务）支持，其他模型在建任务前返回错误 |
+| `frame_count=None` | 整数 2～16，仅 `animated=True` 时可传；省略为上游默认 9 帧 |
+| `frame_duration_ms=None` | 整数 20～2000，仅 `animated=True` 时可传；省略为上游默认 200 毫秒 |
 
-模型省略时继续使用工作台默认模型，不自动改为会话模型；需使用会话偏好模型时先读取偏好再显式传入。风格使用 `style` 预设名，未指定时遵循工作台默认风格；反向提示词使用 `negative_prompt`。模式只对对应平台生效。相同 request_id 下改变显式参数会返回冲突；未指定新参数的历史请求仍保持原签名。
+模型省略时继续使用工作台默认模型，不自动改为会话模型；需使用会话偏好模型时先读取偏好再显式传入。风格使用 `style` 预设名，未指定时遵循工作台默认风格；反向提示词使用 `negative_prompt`。模式只对对应平台生效。相同 request_id 下改变显式参数会返回冲突；未指定新参数的历史请求仍保持原签名。动图任务的结果 `format` 为 `gif`、`mime` 为 `image/gif`，预览与缩略图仍是首帧静态图；上游只返回静态图时任务失败，不会悄悄改发静态图。
 
 成功返回 `accepted=True`、`task_id`、`request_id`、`reused`，并附 task 结构。明确未受理返回 `accepted=False`、`task_id=None`、`status="not_accepted"` 和结构化 error。磁盘/Host/IPC 故障可能没有可信业务回执，客户端保留原请求键返回 submission_unknown，不假定未受理。
 
@@ -257,7 +260,7 @@ async def resume_drawing(ctx, saved, wait_seconds=120):
 
 `drawpic_request_v2(request_id)` 在持久化去重记录中查询，返回同一 task 结构。未找到为 `REQUEST_NOT_FOUND`，可能尚未受理完毕或已超出最多 500 条记录的保留范围，**不能据此自动重画**。`client.recover` 只查询、等待和读取原任务，任何情况下都不调用 submit；RPC 失败或预算结束仍保留原键。
 
-`client.models()` 读取 v1 模型目录，新增 `draw_reason`、`api_edit_image`、`api_edit_reason`、`max_source_images`。`edit_image` 表示模型总体编辑能力；`api_edit_image` 表示当前 Base64 API 能否提供所需输入。例如百炼只接受原图 URL 的模型会单独说明限制。`max_source_images` 是模型已知上限与 API 上限 8 的较小值，未知模型按 API 上限；仍需先检查编辑能力，数量值不代表支持编辑。
+`client.models()` 读取 v1 模型目录，新增 `draw_reason`、`api_edit_image`、`api_edit_reason`、`max_source_images`、`animated_gif`、`animated_gif_reason`。`animated_gif` 按平台默认兼容模式判断模型能否输出 GIF，本次显式改用聊天绘图接口时仍会被拒绝。`edit_image` 表示模型总体编辑能力；`api_edit_image` 表示当前 Base64 API 能否提供所需输入。例如百炼只接受原图 URL 的模型会单独说明限制。`max_source_images` 是模型已知上限与 API 上限 8 的较小值，未知模型按 API 上限；仍需先检查编辑能力，数量值不代表支持编辑。
 
 ### 绘图偏好与风格写入
 

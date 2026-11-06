@@ -9,7 +9,7 @@ import re
 from ..domain.configuration.models import DrawpicConfig
 from ..domain.configuration.types import ReviewModelTask
 from ..infrastructure.http import sanitize_provider_text
-from ..infrastructure.media.images import detect_image_format
+from ..infrastructure.media.images import detect_image_format, review_image_payload
 
 
 @dataclass(slots=True)
@@ -183,7 +183,7 @@ class DrawpicModerationService:
     @classmethod
     def _image_messages(cls, rendered_prompt: str, image_bytes: bytes) -> List[Dict[str, Any]]:
         """在线程内读取图片格式并编码，不占用 Runner 事件循环。"""
-        image_format = cls._detect_image_format(image_bytes)
+        image_bytes, image_format = review_image_payload(image_bytes)
         image_base64 = base64.b64encode(image_bytes).decode("utf-8")
         return [
             {

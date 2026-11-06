@@ -4,7 +4,7 @@ from maibot_sdk import Field, PluginConfigBase
 from pydantic import field_validator
 from typing import Any, Literal
 
-from ...models.openai_profiles import OpenAICompatibilityMode, normalize_openai_mode
+from ...models.openai_profiles import OpenAICompatibilityMode, normalize_openai_mode, normalize_openai_request_mode
 
 
 class OpenAICompatibleInstanceConfig(PluginConfigBase):
@@ -91,6 +91,35 @@ class OpenAICompatibleInstanceConfig(PluginConfigBase):
             "order": 6.5,
         },
     )
+    request_mode: str = Field(
+        default="images",
+        description="Images API 模式下的请求方式：images 直接请求，responses_background 改用 Responses 后台任务提交后轮询",
+        json_schema_extra={
+            "label": "请求方式",
+            "placeholder": "images / responses_background",
+            "hint": "responses_background 避免代理断开长时间无数据的请求；仅 OpenAI 官方或完整兼容 /v1/responses 的服务可用，只对 gpt-image 系列生效",
+            "order": 6.6,
+        },
+    )
+    responses_main_model: str = Field(
+        default="gpt-5.4-mini",
+        description="Responses 后台任务中负责调用图片工具的主模型",
+        json_schema_extra={
+            "label": "Responses 主模型",
+            "placeholder": "gpt-5.4-mini",
+            "hint": "仅 responses_background 使用；主模型只负责原样转交提示词，选便宜的小模型即可",
+            "order": 6.7,
+        },
+    )
+    responses_poll_interval_seconds: float = Field(
+        default=3.0,
+        description="Responses 后台任务轮询间隔（秒），范围 1～30",
+        json_schema_extra={
+            "label": "Responses 轮询间隔",
+            "placeholder": "3",
+            "order": 6.8,
+        },
+    )
     rewrite_prompt_to_english: bool = Field(
         default=False,
         description="是否在调用该实例前将提示词改写为英文",
@@ -148,7 +177,8 @@ class OpenAICompatibleInstanceConfig(PluginConfigBase):
         description="OpenAI Images API 输出图片格式",
         json_schema_extra={
             "label": "输出格式",
-            "placeholder": "png / jpeg / webp",
+            "placeholder": "png / jpeg / webp / gif",
+            "hint": "gif 仅 gpt-image-2.6 系列支持；按次画动图更推荐让绘图工具传 animated",
             "order": 12,
         },
     )
@@ -199,6 +229,20 @@ class OpenAIModelConfig(PluginConfigBase):
         """读取已移除的 NovelAI Images 名称，Schema 只公开现行模式。"""
 
         return normalize_openai_mode(value) if isinstance(value, str) else value
+
+    @field_validator("request_mode", mode="before")
+    @classmethod
+    def normalize_request_mode(cls, value: Any) -> Any:
+        """未知请求方式按默认直接请求处理，避免手改配置后无法加载。"""
+
+        return normalize_openai_request_mode(value)
+
+    @field_validator("responses_poll_interval_seconds", mode="before")
+    @classmethod
+    def clamp_poll_interval(cls, value: Any) -> Any:
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return min(max(float(value), 1.0), 30.0)
+        return value
 
     enabled: bool = Field(
         default=True,
@@ -264,6 +308,36 @@ class OpenAIModelConfig(PluginConfigBase):
             "order": 4.5,
         },
     )
+    request_mode: Literal["images", "responses_background"] = Field(
+        default="images",
+        description="Images API 模式下的请求方式。",
+        json_schema_extra={
+            "label": "请求方式",
+            "hint": "images：直接调用图片生成/编辑接口（默认）。responses_background：改用 Responses API 后台任务提交后轮询结果，"
+            "每次请求都很短，避免代理在约 100 秒无数据时断开长请求；仅 OpenAI 官方或完整兼容 /v1/responses 的服务可用，"
+            "只对 gpt-image 系列生效，聊天绘图与 RinkoAI 模式不受影响。结果在 OpenAI 侧保留约 10 分钟。"
+            "建议同时把通用设置的图片请求超时调到 300 秒左右。",
+            "order": 4.6,
+        },
+    )
+    responses_main_model: str = Field(
+        default="gpt-5.4-mini",
+        description="Responses 后台任务中负责调用图片工具的主模型。",
+        json_schema_extra={
+            "label": "Responses 主模型",
+            "hint": "仅 responses_background 使用；主模型只负责原样转交提示词，选便宜的小模型即可。",
+            "order": 4.7,
+        },
+    )
+    responses_poll_interval_seconds: float = Field(
+        default=3.0,
+        description="Responses 后台任务轮询间隔（秒）。",
+        json_schema_extra={
+            "label": "Responses 轮询间隔",
+            "hint": "单位秒，范围 1～30，默认 3；过低可能触发查询限流。",
+            "order": 4.8,
+        },
+    )
     model_size_overrides: list[str] = Field(
         default=[],
         description="OpenAI 按模型覆盖分辨率。每项格式为 模型名=宽x高。",
@@ -296,7 +370,7 @@ class OpenAIModelConfig(PluginConfigBase):
         description="OpenAI Images API 输出图片格式。",
         json_schema_extra={
             "label": "输出格式",
-            "hint": "常见值：png、jpeg、webp；兼容平台不支持时请留空。",
+            "hint": "常见值：png、jpeg、webp；gif 仅 gpt-image-2.6 系列支持，按次画动图更推荐让绘图工具传 animated。兼容平台不支持时请留空。",
             "order": 8,
         },
     )

@@ -202,6 +202,10 @@ class InstanceProviderRouter(ProviderRouter):
             )
         return route.router.evaluate_model_task_capability(route.model, task_type)
 
+    def evaluate_model_animation_capability(self, model: str, openai_compatibility_mode: str = "") -> ModelTaskCapability:
+        route = self._route(model)
+        return route.router.evaluate_model_animation_capability(route.model, openai_compatibility_mode)
+
     def validate_source_image_count(self, model: str, image_count: int) -> None:
         route = self._route(model)
         route.router.validate_source_image_count(route.model, image_count)

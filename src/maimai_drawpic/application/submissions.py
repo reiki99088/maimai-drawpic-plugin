@@ -5,6 +5,7 @@ import asyncio
 
 from ..domain.task_errors import ModelAccessError, TaskRequestError
 from .drawing.admission import wait_for_admission
+from ..domain.models.animation import AnimationOptions
 
 
 class RequestMixin:
@@ -20,6 +21,7 @@ class RequestMixin:
         request_negative_prompt: str = "",
         requested_novelai_mode: str = "",
         requested_novelai_artist_tags: Optional[str] = None,
+        animation: Optional[AnimationOptions] = None,
         source_image_bytes_list: list[bytes] | None = None,
         source_image_urls: list[str] | None = None,
         matched_message_id: str = "",
@@ -130,6 +132,21 @@ class RequestMixin:
                 task_hint = "图生图" if task_type == "draw" else "文生图"
                 raise ValueError(f"{capability.reason}。请改用 /绘图 {task_hint} <prompt>，或切换到支持当前任务的模型")
 
+            animation_capability = draw_service.router.evaluate_model_animation_capability(
+                check_model, resolved_openai_mode
+            ) if animation is not None else None
+            if animation_capability is not None and not animation_capability.allowed:
+                self.ctx.logger.warning(
+                    "拒绝提交不支持动图的绘图任务: model=%s provider=%s task_type=%s "
+                    "capability_source=%s source_image_count=%s reason=%s",
+                    check_model,
+                    provider_name,
+                    task_type,
+                    animation_capability.source,
+                    len(normalized_source_images),
+                    animation_capability.reason,
+                )
+                raise ValueError(f"{animation_capability.reason}。请切换到支持 GIF 动图的模型，或去掉动图要求")
             draw_service.router.validate_source_image_count(check_model, len(normalized_source_images))
             if not defer_prompt_review:
                 await draw_service.review_prompt_or_raise(prompt)
@@ -204,6 +221,7 @@ class RequestMixin:
                     provider_name=provider_name,
                     novelai_mode=resolved_novelai_mode,
                     novelai_artist_tags=resolved_novelai_artist_tags,
+                    animation=animation,
                     request_negative_prompt=request_negative_prompt.strip(),
                     user_id=resolved_user_id,
                     group_id=resolved_group_id,

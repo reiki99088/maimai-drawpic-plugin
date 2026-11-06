@@ -47,7 +47,9 @@ class ImageResultStore:
         with Image.open(BytesIO(raw)) as original:
             check_image_dimensions(original)
             original.draft("RGB", (edge, edge))
-            image = ImageOps.exif_transpose(original).convert("RGBA" if "A" in original.getbands() else "RGB")
+            # GIF 只取首帧做静态预览；调色板透明色要保留为 Alpha。
+            alpha = "A" in original.getbands() or "transparency" in original.info
+            image = ImageOps.exif_transpose(original).convert("RGBA" if alpha else "RGB")
             image.thumbnail((edge, edge))
             quality = 85
             while True:
@@ -67,8 +69,8 @@ class ImageResultStore:
         prepared = []
         for raw in images:
             extension = detect_image_format(raw)
-            if extension not in {"png", "jpeg", "jpg", "webp"}:
-                raise ValueError("只保存 PNG、JPEG 或 WebP 图片")
+            if extension not in {"png", "jpeg", "jpg", "webp", "gif"}:
+                raise ValueError("只保存 PNG、JPEG、WebP 或 GIF 图片")
             prepared.append((extension, raw, self._preview(raw, 320, 15000), self._preview(raw, 1400, 280000)))
         incoming = sum(len(raw) + len(thumb) + len(preview) for _, raw, thumb, preview in prepared) + 2048 * len(images)
         self.retention.prune_results(

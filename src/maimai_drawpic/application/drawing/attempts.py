@@ -45,6 +45,7 @@ class RequestAttemptRunnerMixin:
                     novelai_mode=novelai_mode,
                     novelai_artist_tags=novelai_artist_tags,
                     fallback_model=model,
+                    animation=primary_attempt.animation,
                 )
             )
             if attempt is None or attempt.model in seen:
