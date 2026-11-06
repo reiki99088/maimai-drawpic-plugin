@@ -103,6 +103,32 @@ class DrawingClient:
             raise DrawingTransportError("查询回执与原请求键不一致", request_id=request_id)
         return result
 
+    async def lookup_world(
+        self,
+        text: str,
+        *,
+        wait_seconds: float = 25,
+        allow_search: bool = True,
+        world_knowledge: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        """查文本里现实对象的词条；pending=True 表示检索仍在后台继续，稍后出图时会命中词条库。"""
+        if not math.isfinite(wait_seconds) or not 0 <= wait_seconds <= 60:
+            raise ValueError("wait_seconds 应为 0～60 秒")
+        rpc = DrawingRPC(self.rpc.api, max(self.rpc.timeout, wait_seconds + 5))
+        result = await rpc.call(
+            "world_lookup", text=text, wait_seconds=wait_seconds, allow_search=allow_search,
+            world_knowledge=world_knowledge,
+        )
+        self._resource_error(result)
+        if (
+            not isinstance(result.get("entries"), list)
+            or type(result.get("pending")) is not bool
+            or type(result.get("disabled")) is not bool
+            or any(not isinstance(entry, dict) or not isinstance(entry.get("name"), str) for entry in result["entries"])
+        ):
+            raise DrawingTransportError("世界知识响应格式无效")
+        return result
+
     async def models(self) -> Dict[str, Any]:
         result = await self.rpc.call("models", version="1")
         if not isinstance(result.get("models"), list) or any(
@@ -276,6 +302,8 @@ class DrawingClient:
         result.generation_completed = snapshot["generation_completed"]
         result.results_readable = snapshot["results_readable"]
         result.delivery, result.retry_after_ms = snapshot["delivery"], snapshot["retry_after_ms"]
+        world = snapshot.get("world_knowledge")
+        result.world_knowledge = dict(world) if isinstance(world, dict) else {}
         result.error = (
             DrawingError(snapshot["error"], task_id=result.task_id, request_id=result.request_id)
             if snapshot["error"] is not None else None

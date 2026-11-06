@@ -28,6 +28,7 @@ class TaskAPIV2Mixin(WorkspaceAPIBase):
         animated: bool = False,
         frame_count: Optional[int] = None,
         frame_duration_ms: Optional[int] = None,
+        world_knowledge: Optional[bool] = None,
     ) -> Dict[str, Any]:
         return await self._task_api_v2().submit(
             prompt=prompt,
@@ -44,7 +45,17 @@ class TaskAPIV2Mixin(WorkspaceAPIBase):
             animated=animated,
             frame_count=frame_count,
             frame_duration_ms=frame_duration_ms,
+            world_knowledge=world_knowledge,
         )
+
+    @API(
+        "drawpic_world_lookup_v2", version="2", public=True,
+        description="按文本查现实对象词条（外观、近期事实），供写分镜参考；超时先返回已有词条，检索在后台继续",
+    )
+    async def drawpic_world_lookup_v2(
+        self, text: str, wait_seconds: float = 25, allow_search: bool = True, world_knowledge: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        return await self._task_api_v2().world_lookup(text, wait_seconds, allow_search, world_knowledge)
 
     @API("drawpic_task_v2", version="2", public=True, description="查询状态、结构化错误和图片引用，不返回图片内容")
     async def drawpic_task_v2(self, task_id: str) -> Dict[str, Any]:

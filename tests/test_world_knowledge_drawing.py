@@ -3,6 +3,7 @@
 from typing import Any, Dict, List
 import asyncio
 import json
+import pytest
 
 from test_routing_review_fixes import add_provider, make_plugin as make_plugin, module, set_settings  # noqa: F401
 from test_world_knowledge_service import FakeLlm, make_service
@@ -366,6 +367,92 @@ def test_gif_results_are_not_verified(make_plugin, monkeypatch, tmp_path):
                 request_negative_prompt="",
             )
             assert result is images and "verify" not in ctx.llm.calls
+        finally:
+            await plugin.on_unload()
+
+    asyncio.run(run())
+
+
+def test_v2_override_signature_and_validation(make_plugin, monkeypatch, tmp_path):
+    from hashlib import sha256
+
+    async def run():
+        plugin = make_plugin(False)
+        await plugin.on_load()
+        try:
+            await add_provider(plugin, "openai", "Primary", models=["primary-image"])
+            service = plugin._require_draw_service()
+            world, ctx, _store = make_service(tmp_path / "world")
+            world.config.general.world_knowledge_enabled = False
+            service.world_knowledge_service = world
+            calls = capture_attempts(service, monkeypatch)
+            model = "Primary/primary-image"
+
+            forced = await plugin.drawpic_submit_v2("画芙宁娜", model=model, request_id="world-forced-01",
+                                                    world_knowledge=True)
+            await asyncio.gather(*tuple(service.background_tasks))
+            assert forced["accepted"] and "[World references" in calls[-1]["prompt"]
+            record = plugin._task_store.get_task(forced["task_id"])
+            values = ["画芙宁娜", model, "", "", "draw", "", None, None, {"world_knowledge": True}]
+            assert record.submission["signature"] == sha256(json.dumps(values, ensure_ascii=False).encode()).hexdigest()
+            conflict = await plugin.drawpic_submit_v2("画芙宁娜", model=model, request_id="world-forced-01")
+            assert conflict["error"]["code"] == "REQUEST_ID_CONFLICT"
+
+            plain = await plugin.drawpic_submit_v2("画芙宁娜", model=model, request_id="world-plain-001")
+            await asyncio.gather(*tuple(service.background_tasks))
+            assert calls[-1]["prompt"] == "画芙宁娜"
+            plain_values = ["画芙宁娜", model, "", "", "draw", "", None, None]
+            assert plugin._task_store.get_task(plain["task_id"]).submission["signature"] == sha256(
+                json.dumps(plain_values, ensure_ascii=False).encode()).hexdigest()
+
+            invalid = await plugin.drawpic_submit_v2("画芙宁娜", model=model, world_knowledge="yes")
+            assert invalid["error"]["code"] == "INVALID_REQUEST" and not invalid["accepted"]
+
+            receipt = await plugin.workspace_submit(json.dumps(
+                {"prompt": "画芙宁娜", "model": model, "world_knowledge": False}, ensure_ascii=False))
+            await asyncio.gather(*tuple(service.background_tasks))
+            assert receipt["task_id"] and calls[-1]["prompt"] == "画芙宁娜"
+        finally:
+            await plugin.on_unload()
+
+    asyncio.run(run())
+
+
+def test_client_lookup_and_result_metadata(make_plugin, monkeypatch, tmp_path):
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parents[1] / "clients"))
+    from maimai_drawing_client import DrawingClient, DrawingError
+    from test_drawing_client import LocalAPI
+
+    async def run():
+        plugin = make_plugin(False)
+        await plugin.on_load()
+        try:
+            await add_provider(plugin, "openai", "Primary", models=["primary-image"])
+            service = plugin._require_draw_service()
+            world, ctx, _store = make_service(tmp_path / "world", llm=FakeLlm(delay=0.3))
+            service.world_knowledge_service = world
+            capture_attempts(service, monkeypatch)
+            client = DrawingClient(LocalAPI(plugin), poll_interval=0.001)
+
+            quick = await client.lookup_world("画芙宁娜", wait_seconds=0)
+            assert quick["pending"] and quick["entries"] == [] and quick["error"] is None
+            await asyncio.gather(*world._background)
+            done = await client.lookup_world("画芙宁娜", wait_seconds=5)
+            entry = done["entries"][0]
+            assert not done["pending"] and entry["name"] == "芙宁娜" and entry["look"] and entry["has_ref"]
+            assert "Furina" in entry["aliases"]
+
+            result = await client.generate("画芙宁娜", model="Primary/primary-image", wait_seconds=5)
+            assert result.status == "completed" and result.world_knowledge["entries"][0]["name"] == "芙宁娜"
+
+            with pytest.raises(DrawingError) as caught:
+                await client.lookup_world("", wait_seconds=1)
+            assert caught.value.code == "INVALID_REQUEST"
+            world.config.general.world_knowledge_enabled = False
+            assert (await client.lookup_world("画芙宁娜", wait_seconds=1))["disabled"] is True
+            assert (await client.lookup_world("画芙宁娜", wait_seconds=1, world_knowledge=True))["disabled"] is False
         finally:
             await plugin.on_unload()
 

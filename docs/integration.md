@@ -192,6 +192,7 @@ async def resume_drawing(ctx, saved, wait_seconds=120):
 | `drawpic_preferences_v2` | 读取真实会话的绘图偏好覆盖值 |
 | `drawpic_preferences_set_v2` | 部分更新会话模型、兼容模式与 NAI 偏好 |
 | `drawpic_presets_v2` | 风格预设查询、保存、重命名与删除，返回结构化错误 |
+| `drawpic_world_lookup_v2` | 按文本查现实对象词条（外观、近期事实），不提交绘图 |
 
 ### submit 参数与返回
 
@@ -207,6 +208,7 @@ async def resume_drawing(ctx, saved, wait_seconds=120):
 | `animated=False` | 布尔值；`True` 请求 GIF 动图，仅 gpt-image-2.6 系列（图片接口或 Responses 后台任务）支持，省略 `model` 时若默认模型不支持，自动改用备选模型或模型目录中第一个支持 GIF 的模型；显式指定的模型不支持时在建任务前返回错误 |
 | `frame_count=None` | 整数 2～16，仅 `animated=True` 时可传；省略为上游默认 9 帧 |
 | `frame_duration_ms=None` | 整数 20～2000，仅 `animated=True` 时可传；省略为上游默认 200 毫秒 |
+| `world_knowledge=None` | 布尔值；省略跟随插件「世界知识」总开关，`true` 本次强制检索现实对象词条并注入，`false` 本次关闭；只在显式传入时计入幂等签名 |
 
 模型省略时继续使用工作台默认模型，不自动改为会话模型；需使用会话偏好模型时先读取偏好再显式传入。风格使用 `style` 预设名，未指定时遵循工作台默认风格；反向提示词使用 `negative_prompt`。模式只对对应平台生效。相同 request_id 下改变显式参数会返回冲突；未指定新参数的历史请求仍保持原签名。动图任务的结果 `format` 为 `gif`、`mime` 为 `image/gif`，预览与缩略图仍是首帧静态图；上游只返回静态图时任务失败，不会悄悄改发静态图。
 
@@ -261,6 +263,21 @@ async def resume_drawing(ctx, saved, wait_seconds=120):
 `drawpic_request_v2(request_id)` 在持久化去重记录中查询，返回同一 task 结构。未找到为 `REQUEST_NOT_FOUND`，可能尚未受理完毕或已超出最多 500 条记录的保留范围，**不能据此自动重画**。`client.recover` 只查询、等待和读取原任务，任何情况下都不调用 submit；RPC 失败或预算结束仍保留原键。
 
 `client.models()` 读取 v1 模型目录，新增 `draw_reason`、`api_edit_image`、`api_edit_reason`、`max_source_images`、`animated_gif`、`animated_gif_reason`。`animated_gif` 按平台默认兼容模式判断模型能否输出 GIF，本次显式改用聊天绘图接口时仍会被拒绝。`edit_image` 表示模型总体编辑能力；`api_edit_image` 表示当前 Base64 API 能否提供所需输入。例如百炼只接受原图 URL 的模型会单独说明限制。`max_source_images` 是模型已知上限与 API 上限 8 的较小值，未知模型按 API 上限；仍需先检查编辑能力，数量值不代表支持编辑。
+
+### 世界知识查询
+
+`drawpic_world_lookup_v2(text, wait_seconds=25, allow_search=True, world_knowledge=None)` 从文本识别现实对象（游戏角色、战队、选手、赛事、产品等），查词条库，缺失或过期时经宿主联网检索并整理成词条。适合在写分镜、台词前调用，让文字与之后的出图使用同一份外观与事实。
+
+| 参数 | 含义 |
+| --- | --- |
+| `text` | 1～4000 字 |
+| `wait_seconds=25` | 0～60 秒；到时先返回已整理好的词条，没做完的检索在后台继续写库，之后出图时直接命中 |
+| `allow_search=True` | `false` 只查词条库，不联网 |
+| `world_knowledge=None` | 同 submit；省略时总开关关闭会直接返回 `disabled=true`，不调用模型或联网 |
+
+返回 `disabled`、`pending`、`entries`、`warnings`、`error`。每个词条含 `id/name/kind/franchise/aliases/look/facts/has_ref/status/sources`：`look` 是不超过 40 字的可见外观，`facts` 为带日期的近期事实（最多 3 条），`sources` 只给来源域名。查询不扣绘图次数，也不取参考图以外的结果；词条是检索资料的整理，调用方仍应把它当作参考而非权威。
+
+`client.lookup_world(text, wait_seconds=25)` 是对应的客户端方法，单次 RPC 的等待按 `wait_seconds` 自动放宽。开启世界知识的任务，task 结构额外带 `world_knowledge`：`entries`（id/name/kind/image_used/sources）、`searched`、`reference_images_sent`、`warnings`、`duration_ms`，开启画后校验时还有 `verify`（`verdict`、`issues`、`redrawn`、`kept` 等）；不含检索词、完整链接或图片内容。客户端结果对应 `DrawingResult.world_knowledge`。
 
 ### 绘图偏好与风格写入
 

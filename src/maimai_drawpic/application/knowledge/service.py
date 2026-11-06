@@ -79,7 +79,7 @@ class WorldResolution:
         return [
             {
                 "id": entry["id"], "name": entry["name"], "kind": entry["kind"], "franchise": entry["franchise"],
-                "look": entry["look"], "facts": list(entry["facts"]), "has_ref": bool(entry["refs"]),
+                "aliases": list(entry["aliases"]), "look": entry["look"], "facts": list(entry["facts"]), "has_ref": bool(entry["refs"]),
                 "image_used": entry["id"] in with_image, "status": entry["status"],
                 "sources": sorted({domain for domain in (source_domain(s["url"]) for s in entry["sources"]) if domain}),
             }
@@ -396,9 +396,11 @@ class WorldKnowledgeService:
 
     # ------------------------------------------------------------------ 查询 API
 
-    async def lookup(self, text: str, *, wait_seconds: float, allow_search: bool = True) -> Dict[str, Any]:
+    async def lookup(
+        self, text: str, *, wait_seconds: float, allow_search: bool = True, override: Optional[bool] = None,
+    ) -> Dict[str, Any]:
         """在 wait_seconds 内返回已整理好的词条；没做完的检索留在后台继续写库。"""
-        if not self.enabled():
+        if not self.enabled(override):
             return {"disabled": True, "pending": False, "entries": []}
         result = WorldResolution()
         if len(self._background) >= MAX_BACKGROUND_LOOKUPS:

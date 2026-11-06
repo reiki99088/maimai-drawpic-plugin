@@ -42,6 +42,25 @@ class IntegrationTaskService:
             return {**self.error_response(exc), "accepted": False, "request_id": kwargs.get("request_id", "")}
         return {**await self.task(receipt["task_id"]), **receipt, "accepted": True}
 
+    async def world_lookup(
+        self, text: str, wait_seconds: float = 25, allow_search: bool = True, world_knowledge: bool | None = None,
+    ) -> Dict[str, Any]:
+        """按文本查现实对象词条；只读词条库和联网检索，不提交绘图、不取用次数。"""
+        empty = {"disabled": False, "pending": False, "entries": [], "warnings": []}
+        if not isinstance(text, str) or not text.strip() or len(text) > 4000:
+            return {**empty, "error": task_error("INVALID_REQUEST", "text 应为 1～4000 个字符")}
+        if type(wait_seconds) not in {int, float} or not 0 <= wait_seconds <= 60:
+            return {**empty, "error": task_error("INVALID_REQUEST", "wait_seconds 应为 0～60 秒")}
+        if type(allow_search) is not bool or world_knowledge is not None and type(world_knowledge) is not bool:
+            return {**empty, "error": task_error("INVALID_REQUEST", "allow_search / world_knowledge 只能是布尔值")}
+        service = self.tasks.get_service().world_knowledge_service
+        if service is None:
+            return {**empty, "disabled": True, "error": None}
+        result = await service.lookup(
+            text, wait_seconds=float(wait_seconds), allow_search=allow_search, override=world_knowledge,
+        )
+        return {**empty, **result, "error": None}
+
     async def request(self, request_id: str) -> Dict[str, Any]:
         """只查询持久化请求映射；未找到不证明从未受理，也不能据此自动重画。"""
         if not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", request_id):

@@ -33,6 +33,7 @@ class RequestMixin:
         submission: Optional[Dict[str, Any]] = None,
         restricted_models_allowed: Optional[bool] = None,
         announce_queue: bool = False,
+        world_knowledge: Optional[bool] = None,
     ) -> dict[str, Any]:
         """按当前会话设置启动后台绘图，源图为空时文生图，存在源图时图生图。
 
@@ -243,6 +244,7 @@ class RequestMixin:
                     on_task_successful=_handle_task_successful,
                     submission=submission,
                     restricted_models_allowed=restricted_allowed,
+                    world_knowledge=world_knowledge,
                 )
             except (Exception, asyncio.CancelledError):
                 await refund(reservation)

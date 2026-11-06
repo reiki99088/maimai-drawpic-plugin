@@ -29,6 +29,8 @@ class DrawingRequest(TypedDict, total=False):
     animated: bool
     frame_count: Optional[int]
     frame_duration_ms: Optional[int]
+    # 世界知识：省略跟随绘图插件总开关，True/False 只覆盖本次请求。
+    world_knowledge: Optional[bool]
 
 
 class DrawingTransportError(RuntimeError):
@@ -88,3 +90,5 @@ class DrawingResult:
     results_readable: bool = False
     delivery: Dict[str, Any] = field(default_factory=dict)
     retry_after_ms: int = 3000
+    # 世界知识脱敏记录：用到的词条、检索耗时与画后校验结论；未启用时为空。
+    world_knowledge: Dict[str, Any] = field(default_factory=dict)

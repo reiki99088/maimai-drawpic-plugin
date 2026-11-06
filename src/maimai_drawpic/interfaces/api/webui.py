@@ -70,7 +70,7 @@ class WebUIAPIMixin(WorkspaceAPIBase):
         values = parse_json_object(request_json)
         allowed = {
             "prompt", "model", "negative_prompt", "style", "task_type", "stream_id", "source_ids", "request_id",
-            "animated", "frame_count", "frame_duration_ms",
+            "animated", "frame_count", "frame_duration_ms", "world_knowledge",
         }
         if values.keys() - allowed:
             raise ValueError("绘图请求包含未知参数")

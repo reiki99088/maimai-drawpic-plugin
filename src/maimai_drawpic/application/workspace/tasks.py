@@ -144,6 +144,7 @@ class WorkspaceTaskService:
         animated: bool = False,
         frame_count: int | None = None,
         frame_duration_ms: int | None = None,
+        world_knowledge: bool | None = None,
     ) -> Dict[str, Any]:
         if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 16000:
             raise ValueError("提示词应为 1～16000 个字符")
@@ -153,6 +154,8 @@ class WorkspaceTaskService:
             raise ValueError("绘图文本参数必须为字符串")
         if task_type not in {"draw", "edit_image"}:
             raise ValueError("任务类型只能是 draw 或 edit_image")
+        if world_knowledge is not None and type(world_knowledge) is not bool:
+            raise ValueError("world_knowledge 只能是 true、false 或省略")
         if len(negative_prompt) > 16000 or len(model) > 200 or len(style) > 80 or len(stream_id) > 200:
             raise ValueError("绘图参数超过长度限制")
         if request_id and not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", request_id):
@@ -177,6 +180,8 @@ class WorkspaceTaskService:
             signature_values.append(options)
         if animation is not None:
             signature_values.append(animation.signature())
+        if world_knowledge is not None:
+            signature_values.append({"world_knowledge": world_knowledge})
         signature = await asyncio.to_thread(
             lambda: sha256(
                 json.dumps(
@@ -279,6 +284,7 @@ class WorkspaceTaskService:
                     defer_prompt_review=True,
                     submission=submission,
                     **({"restricted_models_allowed": True} if trusted_origin else {}),
+                    world_knowledge=world_knowledge,
                 )
             else:
                 result = await service.start_background_image_request(
@@ -295,6 +301,7 @@ class WorkspaceTaskService:
                     prompt_reviewed=False,
                     submission=submission,
                     restricted_models_allowed=trusted_origin,
+                    world_knowledge=world_knowledge,
                 )
             task_id = result["task_id"]
             self.metadata[task_id] = submission
