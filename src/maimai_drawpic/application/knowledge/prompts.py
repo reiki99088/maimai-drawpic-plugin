@@ -1,4 +1,4 @@
-"""世界知识三段提示词（识别对象、整理词条、出图校验）、严格行格式解析与注入文本。
+"""世界知识提示词（识别对象、整理词条、网搜挑图、出图校验）、严格行格式解析与注入文本。
 
 解析只认独立的「键：值」行，不依赖 JSON；格式不对就当没有结果，绝不因此让绘图失败。
 """
@@ -62,6 +62,18 @@ VERIFY_PROMPT = (
     "修正：<给绘图模型的一句英文修正说明>（只在 SEVERE 时写）\n"
     "\n"
     "核对清单：\n{checklist}\n"
+)
+
+PICK_PROMPT = (
+    "下面是为「{name}」（{subject}）网搜到的 {count} 张候选图，依次编号为图 1～图 {count}，"
+    "每张图前面一行是它的来源站点和标题。{look}"
+    "请选出最适合当它本身设计参考的一张：必须就是这个对象本身"
+    "（角色的官方立绘或官方形象、战队或品牌的标志、产品的实物或官方照片等），主体清晰完整。\n"
+    "不要选：别的角色或同名的其他对象、同人或二创、cosplay、游戏截图拼图、表情包、以文字为主的海报或资讯配图、周边商品。"
+    "标题只作参考，以画面为准；都不合适就选 0。\n"
+    "回复严格使用以下格式，不要输出多余内容：\n"
+    "选择：<图的编号，或 0>\n"
+    "理由：<不超过 20 字>\n"
 )
 
 
@@ -190,6 +202,24 @@ def parse_verdict(response: str) -> Verdict:
             if stripped.startswith(prefix):
                 correction = " ".join(stripped[len(prefix):].split())[:300]
     return Verdict(level, tuple(issues), correction if level == "SEVERE" else "")
+
+
+_PICK_LINE = re.compile(r"^\s*选择\s*[:：]\s*(?:图\s*)?(\d{1,2})\s*$", re.MULTILINE)
+
+
+def parse_pick(response: str, count: int) -> Optional[int]:
+    """返回 1 起的编号；选 0、格式不对或越界都返回 None（不用图）。"""
+    matches = _PICK_LINE.findall(str(response or ""))
+    if len(matches) != 1:
+        return None
+    number = int(matches[0])
+    return number if 1 <= number <= count else None
+
+
+def render_pick_prompt(entry: Dict, count: int) -> str:
+    subject = "，".join(part for part in (entry.get("franchise", ""), kind_label(entry.get("kind", "other"))) if part)
+    look = f"已知外观（仅供对照）：{entry['look']}。" if entry.get("look") else ""
+    return PICK_PROMPT.format(name=entry["name"], subject=subject, count=count, look=look)
 
 
 def render_materials(entities: Sequence[EntityMention], materials: Dict[str, List[Tuple[int, str, str]]]) -> str:

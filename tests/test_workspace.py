@@ -58,10 +58,10 @@ def make_plugin(tmp_path, monkeypatch):
 def test_fresh_host_defaults_do_not_create_workspace_sections(make_plugin):
     plugin = make_plugin(configured=False)
     defaults = plugin.get_default_config()
-    assert set(defaults) == {"plugin", "proxy"}
+    assert set(defaults) == {"plugin", "proxy", "world_search"}
     normalized, _ = plugin.normalize_plugin_config(defaults)
-    assert set(normalized) == {"plugin", "proxy"}
-    assert set(plugin.get_webui_config_schema()["sections"]) == {"plugin", "proxy"}
+    assert set(normalized) == {"plugin", "proxy", "world_search"}
+    assert set(plugin.get_webui_config_schema()["sections"]) == {"plugin", "proxy", "world_search"}
 
 
 def test_host_version_upgrade_preserves_json_settings(make_plugin):
@@ -83,7 +83,7 @@ def test_host_version_upgrade_preserves_json_settings(make_plugin):
 
     # Runner 先按默认结构重建并写回，再调用 on_load；不能只验证直接加载模型。
     defaults = plugin.get_default_config()
-    assert set(defaults) == {"plugin", "proxy"}
+    assert set(defaults) == {"plugin", "proxy", "world_search"}
     rebuilt = rebuild_plugin_config_data(defaults, raw)
     normalized, _ = plugin.normalize_plugin_config(rebuilt)
     config_path.write_text(tomlkit.dumps(normalized), encoding="utf-8")
@@ -95,7 +95,7 @@ def test_host_version_upgrade_preserves_json_settings(make_plugin):
             assert plugin.config.general.default_model == "Saved/image-a"
             assert plugin.config.general.request_retry_count == 0
             assert plugin._platform_store.providers == store.providers
-            assert set(tomlkit.parse(config_path.read_text(encoding="utf-8"))) == {"plugin", "proxy"}
+            assert set(tomlkit.parse(config_path.read_text(encoding="utf-8"))) == {"plugin", "proxy", "world_search"}
             assert {p: p.read_bytes() for p in originals} == originals
         finally:
             await plugin.on_unload()
@@ -114,7 +114,7 @@ def test_legacy_defaults_preserve_original_until_backup_and_migration(make_plugi
     config_path.write_bytes(original)
     raw = tomlkit.parse(original.decode())
     defaults = plugin.get_default_config()
-    assert set(defaults) == {"plugin", "proxy", "general", "openai", "prompt_review"}
+    assert set(defaults) == {"plugin", "proxy", "world_search", "general", "openai", "prompt_review"}
     assert defaults["plugin"]["config_version"] == raw["plugin"]["config_version"]
     assert "fixture-original-key" not in json.dumps(defaults)
     # 版本不提前升级，Runner 不会在迁移备份之前写回原文件。
@@ -131,7 +131,7 @@ def test_legacy_defaults_preserve_original_until_backup_and_migration(make_plugi
             backups = (plugin.ctx.paths.data_dir / "migration_backups").glob("*.toml")
             assert any(p.read_bytes() == original for p in backups)
             assert set(tomlkit.parse(config_path.read_text(encoding="utf-8"))) == {"plugin"}
-            assert set(plugin.get_default_config()) == {"plugin", "proxy"}
+            assert set(plugin.get_default_config()) == {"plugin", "proxy", "world_search"}
         finally:
             await plugin.on_unload()
 
@@ -536,8 +536,8 @@ def test_workspace_owns_drawing_settings_and_ignores_old_host_fields(make_plugin
         try:
             bootstrap = await plugin.workspace_bootstrap()
             assert set(bootstrap["settings"]) == {"general", "style"}
-            assert set(plugin.get_plugin_config_data()) == {"plugin", "proxy"}
-            assert set(plugin.get_webui_config_schema()["sections"]) == {"plugin", "proxy"}
+            assert set(plugin.get_plugin_config_data()) == {"plugin", "proxy", "world_search"}
+            assert set(plugin.get_webui_config_schema()["sections"]) == {"plugin", "proxy", "world_search"}
             before = plugin.get_plugin_config_data()
             values = bootstrap["settings"]
             values["general"]["request_retry_count"] = 2

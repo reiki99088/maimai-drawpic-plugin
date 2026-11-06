@@ -14,7 +14,7 @@
 | --- | --- |
 | `data/plugins/maimai-drawpic-plugin/platforms.json` | 所有命名平台实例、连接信息、密钥与模型参数 |
 | `data/plugins/maimai-drawpic-plugin/workspace_settings.json` | 通用参数、管理员、额度规则、审核与风格模板 |
-| 插件目录内的 `config.toml` | 插件开关、代理、图片/日志/上传缓存容量 |
+| 插件目录内的 `config.toml` | 插件开关、代理、图片/日志/上传缓存容量、世界知识搜图服务密钥 |
 
 插件文件夹改名不会改变上面以插件 ID 命名的数据目录。先正常加载插件一次，让它创建配置；编辑已有文件比从零手写完整结构更方便。
 
@@ -167,7 +167,7 @@
 - `world_knowledge_enabled`：世界知识总开关，默认 `false`。开启后群聊画图、工作台与插件 API 都会先识别画面里的现实对象并补充外观描述与参考图；v2 提交和工作台可按单次请求覆盖。需要宿主开启联网检索，否则只使用已有词条。词条与参考图在工作台「世界知识」页管理，不必手改 `world_knowledge/entries.json`。
 - `world_knowledge_model`：识别对象与整理词条使用的宿主任务组，默认 `planner`。`world_knowledge_timeout_seconds` 为画前检索的总时限，默认 60 秒，范围 5～600，超时用已拿到的词条继续绘图。
 - `world_knowledge_max_entities`（默认 3，0～5）、`world_knowledge_max_searches`（默认 4，0～8）、`world_knowledge_max_reference_images`（默认 2，0～2）：每次最多识别的对象数、联网检索次数和附加的参考图张数；对象数为 0 时只匹配手工词条。
-- `world_knowledge_auto_images`：自动为查到的对象找参考图，默认 `true`；选手、公众人物不自动取图。`world_knowledge_screen_images` 用视觉模型筛一遍候选图，默认 `false`。`world_knowledge_allow_fake_ip` 只为检索与取图放行代理 TUN fake-ip 段，默认 `false`。
+- `world_knowledge_auto_images`：自动为查到的对象找参考图，默认 `true`；先查 Data Dragon（英雄联盟英雄）与维基类站点的页面主图，找不到再用下文的网搜取图；选手、公众人物不自动取图。`world_knowledge_screen_images` 用视觉模型筛一遍候选图，默认 `false`。`world_knowledge_allow_fake_ip` 只为检索与取图放行代理 TUN fake-ip 段，默认 `false`。
 - `world_knowledge_verify_enabled`：画后校验，默认 `false`；`world_knowledge_verify_model` 默认 `vlm`，必须支持图片输入。`world_knowledge_redraw_enabled` 默认 `true`，校验判为严重画错时重画一次，任务耗时约翻倍，不额外扣次数。
 - `admin_user_ids`：字符串列表，例如 `["12345678"]`；不同适配器的用户 ID 形式可能不同。
 - `image_edit_unsupported_models`、`text_to_image_unsupported_models`：人工限制的模型列表；优先使用工作台中的完整模型名称。
@@ -181,7 +181,26 @@
 - 不支持注释、尾随逗号、重复字段、`NaN` 或 `Infinity`。多行提示词在字符串中写成 `\n`；使用支持 JSON 的编辑器更方便。
 - 不增加未知字段；字段名区分大小写。平台 ID、类型、修订号和文件版本属于结构字段，不用手动递增来让修改生效。
 - 除 JSON 文件结构外，参数范围仍由平台与插件校验；手动编辑不会绕过模型能力、源图限制或审核。
-- 插件开关、代理和缓存容量继续写在 `config.toml` 的 `plugin` / `proxy` 节，或在 MaiBot 插件配置页修改；不要移进这两个 JSON 文件。
+- 插件开关、代理和缓存容量继续写在 `config.toml` 的 `plugin` / `proxy` 节，世界知识搜图写在 `world_search` 节，或在 MaiBot 插件配置页修改；不要移进这两个 JSON 文件。
+
+### 世界知识搜图（`config.toml` 的 `world_search` 节）
+
+固定图源找不到参考图时，用这些服务网搜候选图：先按尺寸、比例与站点过滤（不收 Pinterest 等转存图床），下载缩略图交给 `world_knowledge_verify_model` 挑出真正对应的一张，挑不出就不用图。没填任何密钥时不网搜。
+
+- `order`：参与的服务及先后，可选 `openai`、`brave`、`tavily`，默认三者都列；没填密钥的自动跳过。
+- `strategy`：`ordered`（默认）每次从第一个开始，失败或挑不出图才换下一个；`round_robin` 每次换一个起点轮流使用，均摊额度。每个对象最多试 2 个服务。
+- `max_candidates`：交给模型挑选的候选张数，默认 8，范围 2～12。
+- `openai_api_key`、`openai_base_url`（默认 `https://api.openai.com/v1`）、`openai_model`：OpenAI Responses API 的 `web_search` 工具，需要能返回图片结果的模型；中转服务必须支持该工具。每次产生搜索工具费与少量 token 费。
+- `brave_api_key`：Brave Search API 图片搜索，结果带原图尺寸。`tavily_api_key`：Tavily 搜索附带的网页图片，每次 1 个 credit。
+- 服务返回鉴权错误时冷却 6 小时，限流、额度不足或请求被拒冷却 30 分钟，网络或服务端错误冷却 5 分钟；改了该服务的密钥、地址或模型立即恢复。密钥不会写进日志，日志也不记录搜图关键词。
+
+```toml
+[world_search]
+order = ["brave", "tavily", "openai"]
+strategy = "round_robin"
+brave_api_key = "<Brave 密钥>"
+tavily_api_key = "<Tavily 密钥>"
+```
 
 ## 常见错误与恢复
 

@@ -44,7 +44,7 @@ PLATFORM_NAMES = {
 PLATFORM_DEFAULT_NAMES = {kind: kind for kind in PLATFORM_NAMES}
 PLATFORM_DEFAULT_NAMES["openai"] = "OpenAI_Compatible"
 COMMON_SECTIONS = ("plugin", "general", "style", "proxy")
-HOST_SECTIONS = ("plugin", "proxy")
+HOST_SECTIONS = ("plugin", "proxy", "world_search")
 SECRET_FIELDS = {"api_key", "password"}
 
 

@@ -1,4 +1,5 @@
-"""世界知识服务：识别提示词里的现实对象 → 查词条库或联网检索 → 整理词条 → 找参考图；出图后对照校验。
+"""世界知识服务：识别提示词里的现实对象 → 查词条库或联网检索 → 整理词条 → 找参考图（固定图源，
+找不到再网搜并由图片模型挑选）；出图后对照校验。
 
 所有失败都只降级为 warning：绘图照常进行，取消（CancelledError）照常向上传播。
 """
@@ -7,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 import asyncio
 import base64
 import re
@@ -15,17 +16,19 @@ import re
 from ...domain.configuration.models import DrawpicConfig
 from ...infrastructure.concurrency import run_owned_thread
 from ...infrastructure.http import HttpProxySettings, sanitize_provider_text
-from ...infrastructure.media.downloads import FAKE_IP_NETWORK
+from ...infrastructure.media.downloads import FAKE_IP_NETWORK, PublicFetchError
 from ...infrastructure.media.images import shrink_image_jpeg
-from ...infrastructure.media.world_sources import FoundImage, WorldImageFinder
+from ...infrastructure.media.world_sources import FoundImage, ImageCandidate, WorldImageFinder, search_candidates
+from ...infrastructure.providers.image_search import ImageSearchError, SearchImage, build_image_search_clients
 from ...infrastructure.storage.world_knowledge import (
     WorldKnowledgeStore, WorldKnowledgeStoreError, entry_mention, is_expired, is_usable, kind_allows_auto_image,
     source_domain,
 )
 from .prompts import (
     CARD_PROMPT, EXTRACT_PROMPT, MAX_MATERIAL_CHARS, VERIFY_PROMPT, EntityMention, Verdict, compose_world_prompt,
-    parse_cards, parse_entities, parse_verdict, render_checklist, render_materials,
+    parse_cards, parse_entities, parse_pick, parse_verdict, render_checklist, render_materials, render_pick_prompt,
 )
+from .search_pool import ImageSearchPool
 
 SEARCH_TIMEOUT_SECONDS = 20
 SEARCH_CONCURRENCY = 2
@@ -35,8 +38,25 @@ OFFLINE_BACKOFF_SECONDS = 600
 IMAGE_RETRY_SECONDS = 6 * 3600
 VERIFY_TIMEOUT_SECONDS = 90
 MAX_BACKGROUND_LOOKUPS = 4
+IMAGE_SEARCH_TIMEOUT_SECONDS = 40
+IMAGE_SEARCH_MIN_SECONDS = 12
+PREVIEW_CONCURRENCY = 4
+PREVIEW_TIMEOUT_SECONDS = 10
+PICK_TIMEOUT_SECONDS = 45
 _RESULT_IMAGE_EDGE = 1280
 _REFERENCE_EDGE = 768
+_PICK_EDGE = 384
+# 网搜取图时附加在名称后面的词，让结果偏向官方设计图而不是新闻配图。
+_IMAGE_QUERY_WORDS = {
+    "game_character": "角色 立绘",
+    "game": "游戏 主视觉",
+    "esports_team": "战队 队标 logo",
+    "esports_event": "赛事 主视觉 logo",
+    "product": "产品 外观 官方图",
+    "brand": "品牌 logo",
+    "meme": "表情包 原图",
+    "place": "实景 照片",
+}
 
 
 class _LlmError(RuntimeError):
@@ -108,6 +128,7 @@ class WorldKnowledgeService:
         *,
         proxy_settings: HttpProxySettings,
         finder: Optional[WorldImageFinder] = None,
+        search_clients: Optional[Mapping[str, Any]] = None,
         clock: Callable[[], float] | None = None,
     ) -> None:
         self.config = config
@@ -119,6 +140,16 @@ class WorldKnowledgeService:
         self._offline_until = 0.0
         self._image_tried: Dict[str, float] = {}
         self._background: Set[asyncio.Task] = set()
+        self._search_clients = search_clients
+        self.search_pool = ImageSearchPool(self._now)
+        self._configure_search(proxy_settings)
+
+    def _configure_search(self, proxy_settings: HttpProxySettings) -> None:
+        search = self.config.world_search
+        clients = self._search_clients
+        if clients is None:
+            clients = build_image_search_clients(search, proxy_settings)
+        self.search_pool.configure(clients, search.order, search.strategy)
 
     def _make_finder(self, proxy_settings: HttpProxySettings) -> WorldImageFinder:
         return WorldImageFinder(
@@ -133,6 +164,7 @@ class WorldKnowledgeService:
         self.config = config
         if not self._custom_finder:
             self.finder = self._make_finder(proxy_settings)
+        self._configure_search(proxy_settings)
 
     # ------------------------------------------------------------------ 开关
 
@@ -374,6 +406,10 @@ class WorldKnowledgeService:
         except TimeoutError:
             result.warn(f"查找参考图超时：{entry['name']}")
             return None
+        if image is None and self.search_pool.configured:
+            image = await self._search_image(entry, deadline, result)
+            if image is None:
+                return None
         if image is None:
             if reasons:
                 result.warn(f"没有找到可用参考图：{entry['name']}（{reasons[-1]}）")
@@ -385,6 +421,90 @@ class WorldKnowledgeService:
         if ref is None:
             return None
         return await asyncio.to_thread(self.store.get, entry["id"])
+
+    async def _search_image(
+        self, entry: Dict[str, Any], deadline: float, result: WorldResolution,
+    ) -> Optional[FoundImage]:
+        """固定图源没有图时网搜：硬过滤 → 下缩略图 → 图片模型挑一张；挑不出就换下一个服务（最多 2 个）。"""
+        query = _image_query(entry)
+        limit = self.config.world_search.max_candidates
+        for client in self.search_pool.sequence():
+            if _left(deadline) < IMAGE_SEARCH_MIN_SECONDS:
+                break
+            started = asyncio.get_running_loop().time()
+            try:
+                found = await client.search(
+                    query, count=limit * 2,
+                    timeout_seconds=min(IMAGE_SEARCH_TIMEOUT_SECONDS, _left(deadline) - IMAGE_SEARCH_MIN_SECONDS / 2),
+                )
+            except ImageSearchError as exc:
+                self.search_pool.failed(client.name, exc.kind)
+                result.warn(str(exc))
+                self.ctx.logger.warning(
+                    "世界知识搜图失败: entry_id=%s provider=%s kind=%s", entry["id"], client.name, exc.kind,
+                )
+                continue
+            self.search_pool.succeeded(client.name)
+            candidates = search_candidates(found, entry["kind"], limit)
+            previews = await self._previews(candidates, deadline)
+            picked = await self._pick(entry, previews, deadline) if previews else None
+            self.ctx.logger.info(
+                "世界知识搜图: entry_id=%s provider=%s results=%s candidates=%s previews=%s picked=%s duration_ms=%s",
+                entry["id"], client.name, len(found), len(candidates), len(previews), picked or 0,
+                round((asyncio.get_running_loop().time() - started) * 1000),
+            )
+            if picked is None:
+                result.warn(f"{client.label} 搜图没有挑出合适的图：{entry['name']}")
+                continue
+            image = await self._fetch_picked(previews[picked - 1][0], f"{client.label} 搜图", result)
+            if image is not None:
+                return image
+        return None
+
+    async def _previews(
+        self, candidates: Sequence[SearchImage], deadline: float,
+    ) -> List[Tuple[SearchImage, bytes]]:
+        semaphore = asyncio.Semaphore(PREVIEW_CONCURRENCY)
+
+        async def one(candidate: SearchImage) -> Optional[bytes]:
+            async with semaphore:
+                try:
+                    return await self.finder.preview(
+                        candidate.thumbnail_url or candidate.url,
+                        timeout_seconds=min(PREVIEW_TIMEOUT_SECONDS, max(1.0, _left(deadline))),
+                    )
+                except PublicFetchError:
+                    return None
+
+        try:
+            async with asyncio.timeout(max(1.0, _left(deadline) - 5)):
+                data = await asyncio.gather(*(one(candidate) for candidate in candidates))
+        except TimeoutError:
+            return []
+        return [(candidate, item) for candidate, item in zip(candidates, data) if item]
+
+    async def _pick(
+        self, entry: Dict[str, Any], previews: Sequence[Tuple[SearchImage, bytes]], deadline: float,
+    ) -> Optional[int]:
+        prompt = render_pick_prompt(entry, len(previews))
+        messages = await asyncio.to_thread(_pick_messages, prompt, previews)
+        try:
+            response = await self._generate(
+                messages, timeout_seconds=min(PICK_TIMEOUT_SECONDS, _left(deadline)), max_tokens=80,
+                model=self.general.world_knowledge_verify_model,
+            )
+        except (_LlmError, TimeoutError):
+            return None
+        return parse_pick(response, len(previews))
+
+    async def _fetch_picked(self, candidate: SearchImage, source: str, result: WorldResolution) -> Optional[FoundImage]:
+        """优先下载原图；原图下不了或太小，再试服务给的缩略图。"""
+        for url in dict.fromkeys(item for item in (candidate.url, candidate.thumbnail_url) if item):
+            try:
+                return await self.finder.fetch(ImageCandidate(url, candidate.page_url, source))
+            except PublicFetchError as exc:
+                result.warn(str(exc))
+        return None
 
     async def _screen(self, image: FoundImage, entry: Dict[str, Any], deadline: float) -> bool:
         prompt = (
@@ -557,6 +677,11 @@ def _search_hits(payload: Any) -> List[Dict[str, str]]:
     return hits[:5]
 
 
+def _image_query(entry: Dict[str, Any]) -> str:
+    parts = [entry["franchise"], entry["name"], _IMAGE_QUERY_WORDS.get(entry["kind"], "")]
+    return " ".join(dict.fromkeys(part for part in parts if part))[:100]
+
+
 def _source(hit: Dict[str, str]) -> Dict[str, str]:
     return {"title": hit["title"], "url": hit["url"], "published_at": hit.get("published_at", "")}
 
@@ -571,6 +696,16 @@ def _image_part(data: bytes, edge: int) -> Dict[str, Any]:
 
 def _image_messages(prompt: str, images: Sequence[bytes], edge: int) -> List[Dict[str, Any]]:
     return [{"role": "user", "content": [{"type": "text", "text": prompt}, *(_image_part(i, edge) for i in images)]}]
+
+
+def _pick_messages(prompt: str, previews: Sequence[Tuple[SearchImage, bytes]]) -> List[Dict[str, Any]]:
+    content: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
+    for number, (candidate, data) in enumerate(previews, 1):
+        site = source_domain(candidate.page_url or candidate.url) or "未知站点"
+        title = " ".join(candidate.text.split())[:60]
+        content.append({"type": "text", "text": f"图 {number}：来源 {site}" + (f"；标题：{title}" if title else "")})
+        content.append(_image_part(data, _PICK_EDGE))
+    return [{"role": "user", "content": content}]
 
 
 def _verify_messages(prompt: str, result: bytes, references: Sequence[bytes]) -> List[Dict[str, Any]]:

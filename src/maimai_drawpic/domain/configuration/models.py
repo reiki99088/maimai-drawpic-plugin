@@ -25,6 +25,7 @@ from .platforms.novelai import NovelAIModelConfig as NovelAIModelConfig
 from .platforms.comfyui import ComfyUIModelConfig as ComfyUIModelConfig
 from .platforms.agnes import AgnesModelConfig as AgnesModelConfig
 from .platforms.codex import CodexAgentConfig as CodexAgentConfig
+from .world_search import WorldSearchConfig as WorldSearchConfig
 from .moderation import ImageModerationConfig as ImageModerationConfig, PromptModerationConfig as PromptModerationConfig
 from .types import (
     AliyunImageInputMode as AliyunImageInputMode,
@@ -48,6 +49,7 @@ class DrawpicConfig(PluginConfigBase):
     general: GeneralConfig = Field(default_factory=GeneralConfig)
     style: StyleConfig = Field(default_factory=StyleConfig)
     proxy: ProxyConfig = Field(default_factory=ProxyConfig)
+    world_search: WorldSearchConfig = Field(default_factory=WorldSearchConfig)
     prompt_review: PromptModerationConfig = Field(default_factory=PromptModerationConfig)
     image_review: ImageModerationConfig = Field(default_factory=ImageModerationConfig)
     openai: OpenAIModelConfig = Field(default_factory=OpenAIModelConfig)
@@ -69,6 +71,7 @@ apply_config_i18n(
         StylePresetConfig,
         StyleConfig,
         ProxyConfig,
+        WorldSearchConfig,
         OpenAICompatibleInstanceConfig,
         OpenAIModelConfig,
         GoogleModelConfig,

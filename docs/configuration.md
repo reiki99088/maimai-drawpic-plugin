@@ -10,7 +10,7 @@
 
 - **绘图平台**：按需添加实例，在平台窗口点击“保存平台”，保存到标准数据目录 `platforms.json`。
 - **偏好与预设**：通用配置、审核配置、风格预设共用草稿，右上角“保存全部设置”统一保存到 `workspace_settings.json`。切换分类保留草稿；离开页面仍有未保存确认。审核仍保存在 `general` 下，已有文件无需拆分或迁移。
-- **MaiBot 插件配置页**：`config.toml` 只保留 `plugin`、`proxy`，管理启用开关、网络代理与缓存上限；扩展工作台不重复展示这些项目。
+- **MaiBot 插件配置页**：`config.toml` 只保留 `plugin`、`proxy`、`world_search`，管理启用开关、网络代理、缓存上限与世界知识搜图服务密钥；扩展工作台不重复展示这些项目。
 
 配置位置以 Runner 授予路径为准，常见持久目录是 `data/plugins/maimai-drawpic-plugin/`，临时目录是 `temp/plugins/maimai-drawpic-plugin/`。数据不依赖插件源码目录名。
 

@@ -21,7 +21,7 @@ class PluginSectionConfig(PluginConfigBase):
         },
     )
     config_version: str = Field(
-        default="2.43.0",
+        default="2.44.0",
         description="配置版本",
         json_schema_extra={
             "hint": "配置版本",
@@ -411,7 +411,8 @@ class GeneralConfig(PluginConfigBase):
         description="是否为新词条自动查找参考图",
         json_schema_extra={
             "label": "自动查找参考图",
-            "hint": "默认开启。按游戏资料站、维基、网页分享图的顺序找图；电竞选手和公众人物不自动取图，可在工作台手动上传。",
+            "hint": "默认开启。先查游戏资料站和维基；找不到时，如果插件配置页的「世界知识搜图」填了密钥，再网搜候选图，由世界知识校验模型挑一张。"
+                    "电竞选手和公众人物不自动取图，可在工作台手动上传。",
             "order": 17.6,
         },
     )

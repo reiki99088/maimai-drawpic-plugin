@@ -44,6 +44,14 @@ _SECTION_TEXTS: Dict[str, Tuple[Tuple[str, str, str], Tuple[str, str, str]]] = {
             "이미지 제공자용 전역 프록시 설정입니다.",
         ),
     ),
+    "WorldSearchConfig": (
+        ("World Knowledge Image Search", "ワールドナレッジ画像検索", "월드 지식 이미지 검색"),
+        (
+            "Search services used to find reference images when fixed sources have none.",
+            "固定ソースに参考画像がないときに使う画像検索サービスです。",
+            "고정 소스에 참고 이미지가 없을 때 사용하는 이미지 검색 서비스입니다.",
+        ),
+    ),
     "OpenAICompatibleInstanceConfig": (
         ("OpenAI-Compatible Instance", "OpenAI 互換インスタンス", "OpenAI 호환 인스턴스"),
         (
@@ -380,6 +388,14 @@ _FIELD_LABEL_OVERRIDES: Dict[str, Tuple[str, str, str]] = {
     "PluginSectionConfig.enabled": ("Enable Plugin", "プラグインを有効化", "플러그인 활성화"),
     "StylePresetConfig.enabled": ("Enable Preset", "プリセットを有効化", "프리셋 활성화"),
     "ProxyConfig.enabled": ("Enable Global Proxy", "共通プロキシを有効化", "전역 프록시 활성화"),
+    "WorldSearchConfig.order": ("Search Service Order", "検索サービスの順序", "검색 서비스 순서"),
+    "WorldSearchConfig.strategy": ("Usage Strategy", "使用方式", "사용 방식"),
+    "WorldSearchConfig.max_candidates": ("Candidate Images", "候補画像数", "후보 이미지 수"),
+    "WorldSearchConfig.openai_api_key": ("OpenAI API Key", "OpenAI API キー", "OpenAI API 키"),
+    "WorldSearchConfig.openai_base_url": ("OpenAI Base URL", "OpenAI ベース URL", "OpenAI 기본 URL"),
+    "WorldSearchConfig.openai_model": ("OpenAI Model", "OpenAI モデル", "OpenAI 모델"),
+    "WorldSearchConfig.brave_api_key": ("Brave API Key", "Brave API キー", "Brave API 키"),
+    "WorldSearchConfig.tavily_api_key": ("Tavily API Key", "Tavily API キー", "Tavily API 키"),
     "OpenAICompatibleInstanceConfig.enabled": ("Enable Instance", "インスタンスを有効化", "인스턴스 활성화"),
     "OpenAIModelConfig.enabled": ("Enable This Platform Instance", "このプラットフォームインスタンスを有効化", "이 플랫폼 인스턴스 활성화"),
     "OpenAIModelConfig.api_key": ("OpenAI API Key", "OpenAI API キー", "OpenAI API 키"),
@@ -524,10 +540,13 @@ _FIELD_HINT_OVERRIDES: Dict[str, Tuple[str, str, str]] = {
         "이미지 편집을 지원하지 않는 모델은 텍스트 설명만 사용합니다.",
     ),
     "GeneralConfig.world_knowledge_auto_images": (
-        "On by default. Looks for images on game wikis, encyclopedias, then page share images. Players and public figures are never "
-        "fetched automatically; upload them in the workbench.",
-        "既定は有効。ゲーム wiki、百科事典、ページの共有画像の順に探します。選手と著名人は自動取得せず、ワークベンチで手動アップロードできます。",
-        "기본값은 켜짐입니다. 게임 위키, 백과사전, 페이지 공유 이미지 순으로 찾습니다. 선수와 공인은 자동으로 가져오지 않으며 워크벤치에서 직접 올릴 수 있습니다.",
+        "On by default. Checks game data sites and wikis first; if nothing is found and World Knowledge Image Search has a key, "
+        "searches the web and lets the verification model pick one. Players and public figures are never fetched automatically; "
+        "upload them in the workbench.",
+        "既定は有効。まずゲーム資料サイトと wiki を探し、見つからず「ワールドナレッジ画像検索」にキーがあればウェブ検索し、"
+        "検証モデルが 1 枚選びます。選手と著名人は自動取得せず、ワークベンチで手動アップロードできます。",
+        "기본값은 켜짐입니다. 먼저 게임 자료 사이트와 위키를 찾고, 없으면 '월드 지식 이미지 검색'에 키가 있을 때 웹을 검색해 "
+        "검증 모델이 한 장을 고릅니다. 선수와 공인은 자동으로 가져오지 않으며 워크벤치에서 직접 올릴 수 있습니다.",
     ),
     "GeneralConfig.world_knowledge_screen_images": (
         "Off by default. When on, each automatically found image costs one more image-review model call to confirm it shows the subject.",

@@ -32,7 +32,8 @@ def is_reseeded_defaults(document: Dict[str, Any]) -> bool:
     if known is None:
         return False
     sections, expected = known
-    if set(document) != {"plugin", "proxy", *sections}:
+    # world_search 是后来加的宿主节，Runner 可能先补进默认值；它不属于误生成的绘图设置。
+    if set(document) - {"world_search"} != {"plugin", "proxy", *sections}:
         return False
     values = {section: document[section] for section in sections}
     try:

@@ -77,6 +77,8 @@ async def attach_workspace(plugin: Any) -> None:
         values = plugin._platform_store.secrets()
         if plugin.config.proxy.password:
             values.append(plugin.config.proxy.password)
+        search = plugin.config.world_search
+        values.extend(key for key in (search.openai_api_key, search.brave_api_key, search.tavily_api_key) if key)
         return values
 
     pending_log_store = asyncio.create_task(asyncio.to_thread(

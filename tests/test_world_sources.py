@@ -1,4 +1,4 @@
-"""世界知识取图来源：离线模拟 Data Dragon、MediaWiki 与 og:image，不访问网络。"""
+"""世界知识取图来源：离线模拟 Data Dragon、MediaWiki 与网搜候选，不访问网络。"""
 
 from io import BytesIO
 from typing import Dict, List
@@ -61,8 +61,11 @@ def test_mediawiki_page_detection() -> None:
     assert api("https://zh.wikipedia.org/wiki/T1_(%E7%94%B5%E7%AB%9E)") == ("https://zh.wikipedia.org/w/api.php", "T1 (电竞)")
     assert api("https://genshin-impact.fandom.com/wiki/Furina") == ("https://genshin-impact.fandom.com/api.php", "Furina")
     assert api("https://genshin-impact.fandom.com/zh/wiki/芙宁娜") == ("https://genshin-impact.fandom.com/zh/api.php", "芙宁娜")
-    assert api("https://wiki.biligame.com/ys/芙宁娜") == ("https://wiki.biligame.com/ys/api.php", "芙宁娜")
-    assert api("https://liquipedia.net/leagueoflegends/T1") == ("https://liquipedia.net/leagueoflegends/api.php", "T1")
+    # 没装 PageImages 或只给旧图的站点不再查。
+    assert api("https://wiki.biligame.com/ys/芙宁娜") is None
+    assert api("https://liquipedia.net/leagueoflegends/T1") is None
+    assert api("https://leagueoflegends.fandom.com/wiki/T1") is None
+    assert api("https://lol.fandom.com/wiki/Faker") is None
     assert api("https://zh.moegirl.org.cn/芙宁娜") == ("https://zh.moegirl.org.cn/api.php", "芙宁娜")
     assert api("https://zh.wikipedia.org/wiki/Special:Search") is None
     assert api("http://zh.wikipedia.org/wiki/T1") is None
@@ -95,28 +98,67 @@ def test_ddragon_champion_is_found_and_cached(tmp_path) -> None:
     asyncio.run(run())
 
 
-def test_mediawiki_then_og_image_with_fallback_on_bad_candidates(tmp_path) -> None:
+def test_mediawiki_fallback_on_bad_candidates_and_no_og_image(tmp_path) -> None:
     wiki_page = "https://genshin-impact.fandom.com/wiki/Furina"
     news_page = "https://news.invalid/furina"
     wiki_thumb = "https://static.invalid/Furina.png"
-    og_image = "https://news.invalid/cover.jpg"
+    wiki_original = "https://static.invalid/Furina_full.png"
     pages = {
-        "https://genshin-impact.fandom.com/api.php?": json.dumps(
-            {"query": {"pages": [{"title": "Furina", "thumbnail": {"source": wiki_thumb}}]}}
-        ),
-        news_page: '<html><head><meta content="/cover.jpg" property="og:image">'
-                   '<meta property="og:image" content="https://news.invalid/logo.png"></head></html>',
+        "https://genshin-impact.fandom.com/api.php?": json.dumps({"query": {"pages": [
+            {"title": "Furina", "thumbnail": {"source": wiki_thumb}},
+            {"title": "Furina", "original": {"source": wiki_original}},
+        ]}}),
+        news_page: '<html><head><meta content="/cover.jpg" property="og:image"></head></html>',
     }
 
     async def run() -> None:
-        finder, calls = make_finder(tmp_path, pages, {wiki_thumb: picture((100, 100)), og_image: picture(mode="RGBA")})
+        finder, calls = make_finder(
+            tmp_path, pages, {wiki_thumb: picture((100, 100)), wiki_original: picture(mode="RGBA")},
+        )
         image, reasons = await finder.find(
             name="芙宁娜", aliases=[], kind="game_character", franchise="原神", pages=[news_page, wiki_page],
         )
-        assert image is not None and image.source == "og_image" and image.page_url == news_page
+        assert image is not None and image.source == "mediawiki" and image.page_url == wiki_page
         assert len(reasons) == 1 and "太小" in reasons[0]
         assert any("prop=pageimages" in call and "titles=Furina" in call for call in calls)
-        assert "https://news.invalid/logo.png" not in calls
+        assert not any(call.startswith("https://news.invalid") for call in calls)
+
+    asyncio.run(run())
+
+
+def test_search_candidates_filter_hosts_sizes_and_duplicates() -> None:
+    sources = module("infrastructure.media.world_sources")
+    SearchImage = module("infrastructure.providers.image_search").SearchImage
+
+    def item(url, width=None, height=None):
+        return SearchImage(url=url, page_url="", thumbnail_url="", width=width, height=height, text="", provider="brave")
+
+    images = [
+        item("https://i.pinimg.com/a.jpg"),
+        item("https://img.invalid/small.jpg", 200, 300),
+        item("https://img.invalid/strip.jpg", 3000, 600),
+        item("https://img.invalid/T1_logo.png"),
+        item("https://img.invalid/ok-1.jpg", 1200, 800),
+        item("https://img.invalid/ok-1.jpg", 1200, 800),
+        item("https://img.invalid/ok-2.png"),
+        item("https://img.invalid/ok-3.png"),
+    ]
+    kept = sources.search_candidates(images, "game_character", 2)
+    assert [image.url for image in kept] == ["https://img.invalid/ok-1.jpg", "https://img.invalid/ok-2.png"]
+    team = sources.search_candidates(images, "esports_team", 8)
+    assert "https://img.invalid/T1_logo.png" in [image.url for image in team]
+
+
+def test_preview_shrinks_and_rewords_errors(tmp_path) -> None:
+    async def run() -> None:
+        downloads = module("infrastructure.media.downloads")
+        finder, _ = make_finder(tmp_path, {}, {"https://img.invalid/big.png": picture((1600, 900))})
+        data = await finder.preview("https://img.invalid/big.png")
+        with Image.open(BytesIO(data)) as image:
+            assert image.format == "JPEG" and max(image.size) == 384
+        with pytest.raises(downloads.PublicFetchError) as caught:
+            await finder.preview("https://img.invalid/missing.png?sig=secret")
+        assert "生成" not in str(caught.value) and "secret" not in str(caught.value)
 
     asyncio.run(run())
 
@@ -126,7 +168,7 @@ def test_download_errors_are_reworded_without_generation_wording(tmp_path) -> No
         sources = module("infrastructure.media.world_sources")
         finder, _ = make_finder(tmp_path, {}, {})
         with pytest.raises(module("infrastructure.media.downloads").PublicFetchError) as caught:
-            await finder.fetch(sources.ImageCandidate("https://img.invalid/a.png?sig=secret", "", "og_image"))
+            await finder.fetch(sources.ImageCandidate("https://img.invalid/a.png?sig=secret", "", "mediawiki"))
         message = str(caught.value)
         assert "生成" not in message and "secret" not in message
         image, reasons = await finder.find(name="x", aliases=[], kind="other", franchise="", pages=[])

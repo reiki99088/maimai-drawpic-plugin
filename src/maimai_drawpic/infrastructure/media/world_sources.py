@@ -1,17 +1,17 @@
-"""世界知识参考图来源：Riot Data Dragon → MediaWiki pageimages → 网页 og:image。
+"""世界知识参考图来源：Riot Data Dragon → MediaWiki pageimages（固定图源）；网搜候选的过滤与缩略图下载。
 
 所有网络访问都经 downloads.py 的逐跳公网校验；本模块只决定「去哪找图」和「哪些图不要」，
 下载结果统一规范成 JPEG。任何来源失败都只是少一个候选，不抛到绘图链路。
+不再读任意网页的 og:image：准确率低，还会访问检索结果里的任意域名。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Tuple
-from urllib.parse import quote, unquote, urlencode, urljoin, urlsplit
+from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from urllib.parse import quote, unquote, urlencode, urlsplit
 import asyncio
 import json
 
@@ -19,7 +19,7 @@ from ..http import HttpProxySettings, sanitize_provider_url
 from ..storage.atomic import write_json_atomically
 from ..storage.world_knowledge import normalize_key
 from .downloads import PublicFetchError, download_image, fetch_public_text
-from .images import normalize_reference_image
+from .images import normalize_reference_image, shrink_image_jpeg
 
 USER_AGENT = (
     "MaiMaiDrawpic/2 (world-knowledge reference lookup; "
@@ -38,7 +38,14 @@ _ALWAYS_REJECT = (
 _LOGO_WORDS = ("logo", "icon")
 _LOGO_KINDS = {"brand", "esports_team"}
 MAX_DOWNLOAD_ATTEMPTS = 3
-MAX_OG_PAGES = 2
+# 这些站点的 pageimages 不可用或给旧图：biligame、Liquipedia 没装 PageImages；
+# 英雄联盟 Fandom 返回多年前的选手照和旧队标，宁可不要。
+_STALE_PAGEIMAGE_HOSTS = {"leagueoflegends.fandom.com", "lol.fandom.com"}
+# 网搜候选里不收的图床：转存图多、来源不明，Pinterest 还常常要登录。
+_BLOCKED_SEARCH_HOSTS = ("pinimg.com", "pinterest.", "fbsbx.com")
+_MIN_SHORT_EDGE = 256
+_MAX_ASPECT = 3.0
+PREVIEW_EDGE = 384
 
 
 @dataclass(frozen=True)
@@ -87,13 +94,11 @@ def mediawiki_api(page_url: str) -> Optional[Tuple[str, str]]:
     api = ""
     if host.endswith(".wikipedia.org") and len(segments) >= 2 and segments[0] == "wiki":
         api, title = f"https://{host}/w/api.php", "/".join(segments[1:])
-    elif host.endswith(".fandom.com"):
+    elif host.endswith(".fandom.com") and host not in _STALE_PAGEIMAGE_HOSTS:
         if len(segments) >= 2 and segments[0] == "wiki":
             api, title = f"https://{host}/api.php", "/".join(segments[1:])
         elif len(segments) >= 3 and segments[1] == "wiki":
             api, title = f"https://{host}/{quote(segments[0])}/api.php", "/".join(segments[2:])
-    elif host in {"wiki.biligame.com", "liquipedia.net"} and len(segments) >= 2:
-        api, title = f"https://{host}/{quote(segments[0])}/api.php", "/".join(segments[1:])
     elif host.endswith("moegirl.org.cn") and segments[0] not in {"index.php", "api.php"}:
         api, title = "https://zh.moegirl.org.cn/api.php", "/".join(segments)
     title = title.replace("_", " ").strip()
@@ -102,34 +107,27 @@ def mediawiki_api(page_url: str) -> Optional[Tuple[str, str]]:
     return api, title
 
 
-class _MetaImageParser(HTMLParser):
-    """只读 <head> 里的 og:image / twitter:image，不执行也不解析脚本。"""
-
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.images: List[str] = []
-        self.done = False
-
-    def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
-        if self.done or tag.casefold() != "meta":
-            return
-        values = {key.casefold(): (value or "") for key, value in attrs}
-        name = (values.get("property") or values.get("name") or "").casefold()
-        if name in {"og:image", "og:image:url", "og:image:secure_url", "twitter:image"} and values.get("content"):
-            self.images.append(values["content"].strip())
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag.casefold() == "head":
-            self.done = True
+def _host_blocked(url: str) -> bool:
+    host = (urlsplit(url).hostname or "").casefold()
+    return any(blocked in host for blocked in _BLOCKED_SEARCH_HOSTS)
 
 
-def og_images(html: str, page_url: str) -> List[str]:
-    parser = _MetaImageParser()
-    try:
-        parser.feed(html[:400_000])
-    except (AssertionError, ValueError):
-        pass  # 残缺 HTML 只取已解析部分。
-    return list(dict.fromkeys(urljoin(page_url, image) for image in parser.images if image))
+def search_candidates(images: Sequence[Any], kind: str, limit: int) -> List[Any]:
+    """网搜结果的硬过滤：地址与站点、已知尺寸的短边和长宽比、去重，按原顺序取前 limit 张。"""
+    result: List[Any] = []
+    seen = set()
+    for image in images:
+        if image.url in seen or not acceptable_image_url(image.url, kind) or _host_blocked(image.url):
+            continue
+        if image.width and image.height:
+            short, long = sorted((image.width, image.height))
+            if short < _MIN_SHORT_EDGE or long > _MAX_ASPECT * short:
+                continue
+        seen.add(image.url)
+        result.append(image)
+        if len(result) >= limit:
+            break
+    return result
 
 
 FetchText = Callable[..., Awaitable[Tuple[str, str]]]
@@ -185,9 +183,6 @@ class WorldImageFinder:
         wiki_pages = [(page, api) for page in pages if (api := mediawiki_api(page))]
         for page, (api, title) in wiki_pages[:2]:
             found.extend(await self._mediawiki_candidates(api, title, page))
-        other_pages = [page for page in pages if not mediawiki_api(page)]
-        for page in other_pages[:MAX_OG_PAGES]:
-            found.extend(await self._og_candidates(page))
         unique: Dict[str, ImageCandidate] = {}
         for candidate in found:
             if acceptable_image_url(candidate.url, kind):
@@ -218,13 +213,6 @@ class WorldImageFinder:
             if isinstance(source, str) and source.startswith("https://"):
                 result.append(ImageCandidate(source, page, "mediawiki"))
         return result
-
-    async def _og_candidates(self, page: str) -> List[ImageCandidate]:
-        try:
-            html = await self._text(page)
-        except PublicFetchError:
-            return []
-        return [ImageCandidate(image, page, "og_image") for image in og_images(html, page)[:2]]
 
     async def _ddragon_candidates(self, names: List[str]) -> List[ImageCandidate]:
         try:
@@ -302,6 +290,25 @@ class WorldImageFinder:
                 f"参考图下载失败（{type(exc).__name__}） url={sanitize_provider_url(candidate.url)}"
             ) from None
         return FoundImage(data=data, size=size, page_url=candidate.page_url, source=candidate.source)
+
+    async def preview(self, url: str, *, timeout_seconds: float = 10) -> bytes:
+        """下载一张网搜候选的缩略图给模型挑选；失败抛 PublicFetchError。"""
+        try:
+            raw = await self._download(
+                url,
+                base_url=_UNTRUSTED_BASE,
+                proxy_settings=self.proxy_settings,
+                timeout_seconds=max(1, int(timeout_seconds)),
+                extra_allowed_networks=self.extra_allowed_networks,
+                headers={"User-Agent": USER_AGENT},
+            )
+            return await asyncio.to_thread(shrink_image_jpeg, raw, PREVIEW_EDGE)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            raise PublicFetchError(
+                f"候选图下载失败（{type(exc).__name__}） url={sanitize_provider_url(url)}"
+            ) from None
 
     async def find(
         self, *, name: str, aliases: Iterable[str], kind: str, franchise: str, pages: Iterable[str],
