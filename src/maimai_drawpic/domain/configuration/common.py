@@ -21,7 +21,7 @@ class PluginSectionConfig(PluginConfigBase):
         },
     )
     config_version: str = Field(
-        default="2.42.0",
+        default="2.43.0",
         description="配置版本",
         json_schema_extra={
             "hint": "配置版本",
@@ -348,6 +348,118 @@ class GeneralConfig(PluginConfigBase):
             "x-widget": "textarea",
             "rows": 8,
             "order": 16,
+        },
+    )
+    world_knowledge_enabled: bool = Field(
+        default=False,
+        description="是否启用世界知识：画前检索提示词里的现实对象（游戏角色、战队、赛事、新产品），按词条和参考图作画",
+        json_schema_extra={
+            "label": "启用世界知识",
+            "hint": "默认关闭。启用后群聊画图、工作台和插件 API 都会先识别提示词里的现实对象，查词条库或联网检索，"
+                    "把外观描述和参考图交给绘图模型；需要 MaiBot 已配置联网搜索。任何一步失败都按原提示词继续出图。",
+            "order": 17,
+        },
+    )
+    world_knowledge_model: ReviewModelTask = Field(
+        default="planner",
+        description="识别现实对象与整理词条使用的宿主模型任务",
+        json_schema_extra={
+            "label": "世界知识模型",
+            "hint": "默认 planner；沿用 MaiBot 中对应任务组的模型配置，可选 replyer、planner 或 vlm。",
+            "order": 17.1,
+        },
+    )
+    world_knowledge_timeout_seconds: int = Field(
+        default=60, ge=5, le=600,
+        description="画前世界知识阶段的总等待时间（秒）",
+        json_schema_extra={
+            "label": "世界知识等待时间（秒）",
+            "hint": "默认 60 秒，可设 5～600 秒；超时就用已经拿到的词条继续出图，不会让任务失败。",
+            "order": 17.2,
+        },
+    )
+    world_knowledge_max_entities: int = Field(
+        default=3, ge=0, le=5,
+        description="单次绘图最多识别的现实对象个数",
+        json_schema_extra={
+            "label": "最多识别对象数",
+            "hint": "默认 3，可设 0～5；0 表示只用词条库里手工建立或改过的词条，不调用模型识别。",
+            "order": 17.3,
+        },
+    )
+    world_knowledge_max_searches: int = Field(
+        default=4, ge=0, le=8,
+        description="单次绘图最多联网检索的次数",
+        json_schema_extra={
+            "label": "最多联网检索次数",
+            "hint": "默认 4，可设 0～8；词条库里未过期的词条不重复检索，0 表示只用词条库。",
+            "order": 17.4,
+        },
+    )
+    world_knowledge_max_reference_images: int = Field(
+        default=2, ge=0, le=2,
+        description="单次绘图最多附加的词条参考图张数",
+        json_schema_extra={
+            "label": "最多附加参考图",
+            "hint": "默认 2，可设 0～2；还受模型可接收的源图张数限制。附加参考图会让文生图改走图生图，"
+                    "不支持图生图的模型只使用文字描述。",
+            "order": 17.5,
+        },
+    )
+    world_knowledge_auto_images: bool = Field(
+        default=True,
+        description="是否为新词条自动查找参考图",
+        json_schema_extra={
+            "label": "自动查找参考图",
+            "hint": "默认开启。按游戏资料站、维基、网页分享图的顺序找图；电竞选手和公众人物不自动取图，可在工作台手动上传。",
+            "order": 17.6,
+        },
+    )
+    world_knowledge_screen_images: bool = Field(
+        default=False,
+        description="是否让图片审核模型确认自动找到的参考图确实是该对象",
+        json_schema_extra={
+            "label": "用模型筛选参考图",
+            "hint": "默认关闭。开启后每张自动找到的参考图多一次图片审核模型调用，更准但更慢。",
+            "order": 17.7,
+        },
+    )
+    world_knowledge_allow_fake_ip: bool = Field(
+        default=False,
+        description="检索资料和下载参考图时是否允许代理 TUN 的 Fake-IP 地址段（198.18.0.0/15）",
+        json_schema_extra={
+            "label": "允许 Fake-IP 地址",
+            "hint": "默认关闭。只有在 Clash、sing-box 等 TUN 模式下资料站被解析为 198.18.x.x 而下载失败时才开启，"
+                    "其他内网地址始终拒绝。",
+            "order": 17.8,
+        },
+    )
+    world_knowledge_verify_enabled: bool = Field(
+        default=False,
+        description="是否在出图后对照词条参考图检查画得像不像",
+        json_schema_extra={
+            "label": "出图后校验",
+            "hint": "默认关闭。只在本次用到了带外观描述或参考图的词条时检查；只对照提供的参考资料，"
+                    "画风和姿势不同不算错。",
+            "order": 18,
+        },
+    )
+    world_knowledge_verify_model: ReviewModelTask = Field(
+        default="vlm",
+        description="出图后校验使用的宿主模型任务，需要支持图片输入",
+        json_schema_extra={
+            "label": "校验模型",
+            "hint": "默认 vlm；所选任务组的模型必须支持多张图片输入，否则校验按通过处理。",
+            "order": 18.1,
+        },
+    )
+    world_knowledge_redraw_enabled: bool = Field(
+        default=True,
+        description="校验发现严重画错时是否自动重画一次",
+        json_schema_extra={
+            "label": "严重画错时重画一次",
+            "hint": "默认开启。只重画 1 次且不额外扣次数，任务耗时约翻倍；重画后再比较一次，保留更准的一张，重画失败保留原图。",
+            "order": 18.2,
         },
     )
 

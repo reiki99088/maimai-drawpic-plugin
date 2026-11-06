@@ -131,6 +131,20 @@ _SECTION_TEXTS: Dict[str, Tuple[Tuple[str, str, str], Tuple[str, str, str]]] = {
 }
 
 _FIELD_LABELS: Dict[str, Tuple[str, str, str]] = {
+    "world_knowledge_enabled": ("Enable World Knowledge", "ワールドナレッジを有効化", "세계 지식 사용"),
+    "world_knowledge_model": ("World Knowledge Model", "ワールドナレッジのモデル", "세계 지식 모델"),
+    "world_knowledge_timeout_seconds": (
+        "World Knowledge Wait (seconds)", "ワールドナレッジの待機時間（秒）", "세계 지식 대기 시간(초)"
+    ),
+    "world_knowledge_max_entities": ("Max Recognized Subjects", "認識する対象の上限", "최대 인식 대상 수"),
+    "world_knowledge_max_searches": ("Max Web Searches", "Web 検索の上限", "최대 웹 검색 횟수"),
+    "world_knowledge_max_reference_images": ("Max Reference Images", "参照画像の上限", "최대 참고 이미지 수"),
+    "world_knowledge_auto_images": ("Find Reference Images Automatically", "参照画像を自動で探す", "참고 이미지 자동 찾기"),
+    "world_knowledge_screen_images": ("Screen Reference Images with a Model", "モデルで参照画像を確認", "모델로 참고 이미지 확인"),
+    "world_knowledge_allow_fake_ip": ("Allow Fake-IP Addresses", "Fake-IP アドレスを許可", "Fake-IP 주소 허용"),
+    "world_knowledge_verify_enabled": ("Check After Drawing", "生成後に確認", "생성 후 확인"),
+    "world_knowledge_verify_model": ("Check Model", "確認モデル", "확인 모델"),
+    "world_knowledge_redraw_enabled": ("Redraw Once on Severe Errors", "重大な誤りは 1 回だけ再生成", "심각한 오류 시 한 번 다시 그리기"),
     "access_scope": ("Access Scope", "利用範囲", "사용 범위"),
     "agent_instructions": ("Agent Instructions", "エージェント指示", "에이전트 지침"),
     "allow_proxy_fake_ip": ("Allow Proxy Fake-IP Addresses", "プロキシの fake-ip を許可", "프록시 fake-ip 주소 허용"),
@@ -472,6 +486,76 @@ _OPENAI_MODE_HINTS = (
 
 
 _FIELD_HINT_OVERRIDES: Dict[str, Tuple[str, str, str]] = {
+    "GeneralConfig.world_knowledge_enabled": (
+        "Off by default. When on, chat drawing, the workbench and plugin APIs first recognize real-world subjects in the prompt "
+        "(game characters, teams, events, new products), look them up in the entry library or search the web, and pass "
+        "appearance notes and reference images to the image model. Requires Host web search. Any failure continues with the original prompt.",
+        "既定は無効です。有効にすると、チャット描画・ワークベンチ・プラグイン API はプロンプト内の実在の対象（ゲームキャラクター、チーム、大会、新製品）を"
+        "認識し、エントリー辞書または Web 検索で調べて、外見メモと参照画像を画像モデルに渡します。Host の Web 検索設定が必要です。失敗しても元のプロンプトで続行します。",
+        "기본값은 꺼짐입니다. 켜면 채팅 그리기, 워크벤치, 플러그인 API가 프롬프트 속 실제 대상(게임 캐릭터, 팀, 대회, 신제품)을 인식하고 항목 사전이나 "
+        "웹 검색으로 찾아 외형 설명과 참고 이미지를 이미지 모델에 전달합니다. Host 웹 검색 설정이 필요합니다. 실패해도 원래 프롬프트로 계속합니다.",
+    ),
+    "GeneralConfig.world_knowledge_model": (
+        "Default: planner. Uses the models configured for the Host replyer, planner or vlm task group.",
+        "既定は planner。Host の replyer、planner、vlm タスクグループに設定されたモデルを使用します。",
+        "기본값은 planner입니다. Host의 replyer, planner 또는 vlm 작업 그룹에 설정된 모델을 사용합니다.",
+    ),
+    "GeneralConfig.world_knowledge_timeout_seconds": (
+        "Default: 60 seconds, range 5–600. On timeout, drawing continues with the entries found so far; the task never fails because of it.",
+        "既定は 60 秒、範囲は 5～600 秒。時間切れの場合はそれまでに得たエントリーで描画を続け、タスクは失敗しません。",
+        "기본 60초, 범위 5~600초. 시간이 지나면 그때까지 찾은 항목으로 계속 그리며 작업이 실패하지 않습니다.",
+    ),
+    "GeneralConfig.world_knowledge_max_entities": (
+        "Default: 3, range 0–5. 0 uses only entries you created or edited in the library, without model recognition.",
+        "既定は 3、範囲は 0～5。0 の場合はモデルで認識せず、辞書で手動作成・編集したエントリーだけを使います。",
+        "기본 3, 범위 0~5. 0이면 모델 인식 없이 사전에서 직접 만들거나 수정한 항목만 사용합니다.",
+    ),
+    "GeneralConfig.world_knowledge_max_searches": (
+        "Default: 4, range 0–8. Unexpired library entries are not searched again; 0 uses the library only.",
+        "既定は 4、範囲は 0～8。期限内の辞書エントリーは再検索しません。0 は辞書のみを使います。",
+        "기본 4, 범위 0~8. 만료되지 않은 사전 항목은 다시 검색하지 않으며 0이면 사전만 사용합니다.",
+    ),
+    "GeneralConfig.world_knowledge_max_reference_images": (
+        "Default: 2, range 0–2, also limited by how many source images the model accepts. Reference images turn text-to-image into "
+        "image editing; models without image editing use the text notes only.",
+        "既定は 2、範囲は 0～2。モデルが受け付ける元画像の枚数にも制限されます。参照画像を付けると文生図は画像編集になり、"
+        "画像編集に対応しないモデルでは文字の説明だけを使います。",
+        "기본 2, 범위 0~2이며 모델이 받는 원본 이미지 수에도 제한됩니다. 참고 이미지를 붙이면 텍스트 생성이 이미지 편집으로 바뀌고, "
+        "이미지 편집을 지원하지 않는 모델은 텍스트 설명만 사용합니다.",
+    ),
+    "GeneralConfig.world_knowledge_auto_images": (
+        "On by default. Looks for images on game wikis, encyclopedias, then page share images. Players and public figures are never "
+        "fetched automatically; upload them in the workbench.",
+        "既定は有効。ゲーム wiki、百科事典、ページの共有画像の順に探します。選手と著名人は自動取得せず、ワークベンチで手動アップロードできます。",
+        "기본값은 켜짐입니다. 게임 위키, 백과사전, 페이지 공유 이미지 순으로 찾습니다. 선수와 공인은 자동으로 가져오지 않으며 워크벤치에서 직접 올릴 수 있습니다.",
+    ),
+    "GeneralConfig.world_knowledge_screen_images": (
+        "Off by default. When on, each automatically found image costs one more image-review model call to confirm it shows the subject.",
+        "既定は無効。有効にすると、自動で見つけた画像ごとに画像審査モデルを 1 回呼び出して対象かどうか確認します。",
+        "기본값은 꺼짐입니다. 켜면 자동으로 찾은 이미지마다 이미지 검토 모델을 한 번 더 호출해 대상이 맞는지 확인합니다.",
+    ),
+    "GeneralConfig.world_knowledge_allow_fake_ip": (
+        "Off by default. Enable only when a TUN proxy (Clash, sing-box) resolves sites to 198.18.x.x and downloads fail. Other private addresses are always refused.",
+        "既定は無効。TUN プロキシ（Clash、sing-box など）でサイトが 198.18.x.x に解決されて取得に失敗する場合だけ有効にしてください。その他の内部アドレスは常に拒否します。",
+        "기본값은 꺼짐입니다. TUN 프록시(Clash, sing-box 등)에서 사이트가 198.18.x.x로 해석되어 다운로드가 실패할 때만 켜세요. 다른 내부 주소는 항상 거부합니다.",
+    ),
+    "GeneralConfig.world_knowledge_verify_enabled": (
+        "Off by default. Checks only when this drawing used entries with appearance notes or reference images, comparing against "
+        "the supplied references only; differences in style and pose are not errors.",
+        "既定は無効。外見メモや参照画像のあるエントリーを使った場合だけ、与えた参照資料とだけ照合します。画風やポーズの違いは誤りとしません。",
+        "기본값은 꺼짐입니다. 외형 설명이나 참고 이미지가 있는 항목을 사용한 경우에만 제공된 참고 자료와만 비교하며, 화풍과 자세 차이는 오류로 보지 않습니다.",
+    ),
+    "GeneralConfig.world_knowledge_verify_model": (
+        "Default: vlm. Models in the selected group must accept several images; otherwise the check is treated as passed.",
+        "既定は vlm。選択したグループのモデルは複数画像の入力に対応している必要があります。対応しない場合は確認を合格扱いにします。",
+        "기본값은 vlm입니다. 선택한 그룹의 모델은 여러 이미지 입력을 지원해야 하며, 그렇지 않으면 확인을 통과로 처리합니다.",
+    ),
+    "GeneralConfig.world_knowledge_redraw_enabled": (
+        "On by default. Redraws once with no extra quota, roughly doubling task time; compares again and keeps the more accurate image. "
+        "A failed redraw keeps the original.",
+        "既定は有効。追加の回数消費なしで 1 回だけ再生成し、所要時間はおよそ 2 倍になります。再度比較してより正確な方を残し、再生成に失敗した場合は元の画像を残します。",
+        "기본값은 켜짐입니다. 추가 횟수 차감 없이 한 번만 다시 그리며 작업 시간이 약 두 배가 됩니다. 다시 비교해 더 정확한 이미지를 남기고, 다시 그리기에 실패하면 원본을 남깁니다.",
+    ),
     "OpenAIModelConfig.request_mode": (
         "images: call the image generation/edit endpoints directly (default). responses_background: submit a "
         "Responses API background task and poll for the result, so every HTTP request stays short and proxies that "
