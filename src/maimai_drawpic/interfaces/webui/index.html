@@ -3317,6 +3317,7 @@ dialog::backdrop {
   // Unconfirmed immutable snapshots belong to requests, never to a DOM button.
   const submissions = new Map();
   const draft = {};
+  let draftAnimated = false;
   function saveDraft() {
     for (const id of [
       "draw-prompt",
@@ -3325,10 +3326,31 @@ dialog::backdrop {
       "draw-negative",
       "draw-delivery",
       "chat-platform",
+      "draw-frames",
+      "draw-frame-ms",
     ]) {
       const input = $("#" + id);
       if (input) draft[id] = input.value;
     }
+    const animated = $("#draw-animated");
+    if (animated) draftAnimated = animated.checked;
+  }
+  // 动图开关跟随所选模型：不支持 GIF 的模型禁用开关并说明原因，避免提交后才被拒。
+  function syncAnimation() {
+    const toggle = $("#draw-animated");
+    if (!toggle) return;
+    const model = state.data.models.find((item) => item.name === $("#draw-model").value);
+    const supported = Boolean(model && model.animated_gif);
+    toggle.disabled = !supported;
+    if (!supported) toggle.checked = false;
+    $("#anim-options").hidden = !toggle.checked;
+    $("#anim-hint").textContent = supported
+      ? "所有帧排在长边最多 3840 像素的拼图上，帧数越多单帧越小；结果为 GIF，预览显示首帧。"
+      : `${(model && model.animated_gif_reason) || "当前模型不支持 GIF 动图"}。需要动图请切换到 gpt-image-2.6 系列模型。`;
+  }
+  function positiveInt(id) {
+    const raw = $("#" + id).value.trim();
+    return raw === "" ? undefined : Number(raw);
   }
   function modelOptions() {
     const placeholder = state.data.default_model_error
@@ -3478,7 +3500,7 @@ dialog::backdrop {
         )
         .join(
           "",
-        )}</select></div></div>${mode === "edit_image" ? `<div class="field"><label>源图片</label><div class="upload-zone" id="upload-zone">${icon("upload")}<p>拖放图片到这里，或选择文件</p><button type="button" id="source-button" class="button secondary compact">${icon("upload")}选择源图片</button><input type="file" id="source-file" accept="image/png,image/jpeg,image/webp" multiple hidden></div><div class="source-list" id="source-list"></div><p class="hint">上传真实源图；最终支持数量以模型为准。需要公网原图 URL 的模型不支持直接使用网页上传的本地图片。</p></div>` : ""}<details><summary class="muted" style="cursor:pointer;margin-bottom:15px">反向提示词与发送选项</summary><div class="field"><label for="draw-negative">反向提示词</label><textarea id="draw-negative" rows="2" maxlength="16000" placeholder="不希望出现在画面中的内容"></textarea></div><div class="field"><label for="draw-delivery">结果去向</label><select id="draw-delivery"><option value="web">仅在工作台查看</option><option value="chat">同时发送到聊天</option></select></div><div id="delivery-fields" hidden><div class="field-row"><div class="field"><label for="chat-platform">聊天平台标识</label><input id="chat-platform" value="qq" maxlength="80"></div><div class="field"><label>&nbsp;</label><button type="button" id="load-streams" class="button secondary wide">加载聊天会话</button></div></div><div class="field"><label for="draw-stream">目标会话</label><select id="draw-stream"><option value="">请先加载会话</option></select><p class="hint">使用实际聊天流；发送到聊天时沿用群聊或私聊额度。网页专用任务由当前实例管理，不计入聊天额度。</p></div></div></details><div class="sticky-save"><span class="hint">模型校验 · 提示词与图片审核</span><button type="submit" class="button" id="start-drawing">${icon("sparkles")}开始绘图</button></div></form></section><aside class="stack"><section class="panel"><div class="panel-header"><h3>创作结果</h3>${icon("images")}</div><div id="studio-submissions" aria-live="polite"></div><div id="studio-result"><div class="placeholder-art">${icon("sparkles")}<span>想象，正在等待落笔</span><small>任务提交后，会在这里显示进度与生成图片。</small></div></div></section><div class="panel"><h3>让画面更接近你的想法</h3><p class="hint">描述具体的主体、环境和光线。试试风格预设，把常用的画面语言保存下来。</p><button class="button ghost compact" id="studio-presets" style="margin-top:8px">管理预设 ${icon("arrow")}</button></div></aside></div>`;
+        )}</select></div></div><div class="field"><label class="inline-choice"><input type="checkbox" role="switch" class="toggle" id="draw-animated" aria-describedby="anim-hint">输出 GIF 动图</label><div class="field-row" id="anim-options" hidden><div class="field"><label for="draw-frames">帧数（2～16）</label><input id="draw-frames" type="number" min="2" max="16" step="1" placeholder="默认 9"></div><div class="field"><label for="draw-frame-ms">每帧毫秒（20～2000）</label><input id="draw-frame-ms" type="number" min="20" max="2000" step="10" placeholder="默认 200"></div></div><p class="hint" id="anim-hint"></p></div>${mode === "edit_image" ? `<div class="field"><label>源图片</label><div class="upload-zone" id="upload-zone">${icon("upload")}<p>拖放图片到这里，或选择文件</p><button type="button" id="source-button" class="button secondary compact">${icon("upload")}选择源图片</button><input type="file" id="source-file" accept="image/png,image/jpeg,image/webp" multiple hidden></div><div class="source-list" id="source-list"></div><p class="hint">上传真实源图；最终支持数量以模型为准。需要公网原图 URL 的模型不支持直接使用网页上传的本地图片。</p></div>` : ""}<details><summary class="muted" style="cursor:pointer;margin-bottom:15px">反向提示词与发送选项</summary><div class="field"><label for="draw-negative">反向提示词</label><textarea id="draw-negative" rows="2" maxlength="16000" placeholder="不希望出现在画面中的内容"></textarea></div><div class="field"><label for="draw-delivery">结果去向</label><select id="draw-delivery"><option value="web">仅在工作台查看</option><option value="chat">同时发送到聊天</option></select></div><div id="delivery-fields" hidden><div class="field-row"><div class="field"><label for="chat-platform">聊天平台标识</label><input id="chat-platform" value="qq" maxlength="80"></div><div class="field"><label>&nbsp;</label><button type="button" id="load-streams" class="button secondary wide">加载聊天会话</button></div></div><div class="field"><label for="draw-stream">目标会话</label><select id="draw-stream"><option value="">请先加载会话</option></select><p class="hint">使用实际聊天流；发送到聊天时沿用群聊或私聊额度。网页专用任务由当前实例管理，不计入聊天额度。</p></div></div></details><div class="sticky-save"><span class="hint">模型校验 · 提示词与图片审核</span><button type="submit" class="button" id="start-drawing">${icon("sparkles")}开始绘图</button></div></form></section><aside class="stack"><section class="panel"><div class="panel-header"><h3>创作结果</h3>${icon("images")}</div><div id="studio-submissions" aria-live="polite"></div><div id="studio-result"><div class="placeholder-art">${icon("sparkles")}<span>想象，正在等待落笔</span><small>任务提交后，会在这里显示进度与生成图片。</small></div></div></section><div class="panel"><h3>让画面更接近你的想法</h3><p class="hint">描述具体的主体、环境和光线。试试风格预设，把常用的画面语言保存下来。</p><button class="button ghost compact" id="studio-presets" style="margin-top:8px">管理预设 ${icon("arrow")}</button></div></aside></div>`;
     for (const [id, value] of Object.entries(draft)) {
       const input = $("#" + id);
       if (
@@ -3489,6 +3511,10 @@ dialog::backdrop {
         input.value = value;
     }
     $("#delivery-fields").hidden = $("#draw-delivery").value !== "chat";
+    $("#draw-animated").checked = draftAnimated;
+    syncAnimation();
+    $("#draw-model").onchange = syncAnimation;
+    $("#draw-animated").onchange = syncAnimation;
     function changeMode(next) {
       if (mode === next) return;
       saveDraft();
@@ -3584,6 +3610,14 @@ dialog::backdrop {
               ? state.sources.map((item) => item.source_id)
               : [],
         };
+        // 未开动图时不带动图字段，旧请求的去重签名保持不变。
+        if ($("#draw-animated").checked) {
+          request.animated = true;
+          const frames = positiveInt("draw-frames");
+          const duration = positiveInt("draw-frame-ms");
+          if (frames !== undefined) request.frame_count = frames;
+          if (duration !== undefined) request.frame_duration_ms = duration;
+        }
         const signature = JSON.stringify(request);
         let entry = submissions.get(signature);
         if (!entry) {

@@ -383,3 +383,21 @@ def test_unspecified_model_switches_to_gif_capable_model(make_plugin, monkeypatc
             await plugin.on_unload()
 
     asyncio.run(run())
+
+
+def test_workspace_submit_accepts_animation_fields(make_plugin, monkeypatch) -> None:
+    async def run() -> None:
+        plugin, service, name, attempts = await gif_plugin(make_plugin, monkeypatch, ["gpt-image-2.6-flare"])
+        try:
+            request = {"prompt": "blinking cat", "model": f"{name}/gpt-image-2.6-flare", "task_type": "draw",
+                       "animated": True, "frame_count": 4, "request_id": "gif-workspace-01"}
+            submitted = await plugin.workspace_submit(json.dumps(request))
+            await asyncio.gather(*tuple(service.background_tasks))
+            assert submitted.get("task_id"), submitted
+            assert attempts[-1].animation == AnimationOptions(4, None)
+            unknown = await plugin.workspace_submit(json.dumps({**request, "request_id": "gif-workspace-02", "fps": 3}))
+            assert "未知参数" in json.dumps(unknown, ensure_ascii=False)
+        finally:
+            await plugin.on_unload()
+
+    asyncio.run(run())

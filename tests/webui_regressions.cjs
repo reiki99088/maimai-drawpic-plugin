@@ -434,6 +434,32 @@ test('studio FIFO: late A receipt cannot clear queued B key; lost receipt reuses
   assert.equal(h.U.state.lastTask, 'B'); assert.equal(h.U.state.requestId, null);
   assert.equal(h.get('#studio-submissions').innerHTML, '');
 });
+test('studio GIF toggle is disabled for models without GIF and plain requests carry no animation', async () => {
+  const h = fifoController();
+  h.U.state.data.models = [{ name: 'codex', draw: true, animated_gif: false, animated_gif_reason: '当前模型 codex 不支持 GIF 动图输出' },
+    { name: 'flare', draw: true, animated_gif: true }];
+  await h.U.views.studio();
+  h.get('#draw-model').value = 'codex'; h.get('#draw-animated').checked = true; h.get('#draw-model').onchange();
+  assert.equal(h.get('#draw-animated').disabled, true); assert.equal(h.get('#draw-animated').checked, false);
+  assert.match(h.get('#anim-hint').textContent, /不支持 GIF/);
+  h.get('#draw-prompt').value = 'still';
+  h.get('#draw-form').onsubmit(event); await flush();
+  assert.equal('animated' in JSON.parse(h.calls[0].args.request_json), false);
+});
+test('studio GIF toggle sends animated with only the frame fields that were filled', async () => {
+  const h = fifoController();
+  h.U.state.data.models = [{ name: 'flare', draw: true, animated_gif: true }];
+  await h.U.views.studio();
+  h.get('#draw-model').value = 'flare'; h.get('#draw-model').onchange();
+  assert.equal(h.get('#draw-animated').disabled, false);
+  h.get('#draw-animated').checked = true; h.get('#draw-animated').onchange();
+  assert.equal(h.get('#anim-options').hidden, false);
+  h.get('#draw-frames').value = '4'; h.get('#draw-frame-ms').value = '';
+  h.get('#draw-prompt').value = 'blink';
+  h.get('#draw-form').onsubmit(event); await flush();
+  const sent = JSON.parse(h.calls[0].args.request_json);
+  assert.equal(sent.animated, true); assert.equal(sent.frame_count, 4); assert.equal('frame_duration_ms' in sent, false);
+});
 test('studio FIFO: same pending snapshot is not submitted twice after rebuild or input events', async () => {
   const h = fifoController(); await h.U.views.studio();
   h.get('#draw-model').value = 'model'; h.get('#draw-prompt').value = 'same';
