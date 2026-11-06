@@ -81,6 +81,14 @@ class RequestMixin:
                 session_preference.get("novelai_artist_tags", "")
                 if requested_novelai_artist_tags is None else requested_novelai_artist_tags
             )
+            if animation is not None and not requested_model:
+                # 只替换默认/会话模型；明确指定的模型出不了 GIF 时照常报错。
+                animation_model = draw_service.router.resolve_animation_model(resolved_model, resolved_openai_mode)
+                if animation_model and animation_model != resolved_model:
+                    self.ctx.logger.info(
+                        "动图请求改用支持 GIF 的模型: original_model=%s model=%s", resolved_model, animation_model
+                    )
+                    resolved_model = animation_model
             provider_name = draw_service.router.get_model_provider(resolved_model)
             if not provider_name:
                 raise ValueError(f"指定模型不可用：{resolved_model}")

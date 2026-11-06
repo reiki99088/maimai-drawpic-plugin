@@ -213,6 +213,17 @@ class WorkspaceTaskService:
             service = self.get_service()
             router = service.router
             resolved_model = router.resolve_model_name(model, allow_unknown_model=False)
+            if animation is not None and not model.strip():
+                # 未指定模型才替换；调用方明确选的模型出不了 GIF 时照常报错。
+                animation_model = router.resolve_animation_model(resolved_model, options["openai_compatibility_mode"])
+                if animation_model and animation_model != resolved_model:
+                    self.ctx.logger.info(
+                        "动图任务改用支持 GIF 的模型: origin=%s original_model=%s model=%s",
+                        origin,
+                        resolved_model,
+                        animation_model,
+                    )
+                    resolved_model = animation_model
             # 工作台由宿主管理页面访问，视为管理员；插件 API 不带会话时无法确认请求者身份。
             trusted_origin = origin == "webui"
             requires_admin = getattr(router, "model_requires_admin", None)

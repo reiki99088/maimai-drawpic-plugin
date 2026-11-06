@@ -139,6 +139,16 @@ class DrawingToolMixin:
             resolved_model = draw_service.resolve_model_name(model.strip() or session_preference["model"])
             resolved_openai_mode = session_preference["openai_compatibility_mode"]
             router = self._require_router()
+            if animation is not None and not model.strip():
+                # 只替换默认/会话模型；LLM 明确指定的模型出不了 GIF 时照常报错。
+                animation_model = router.resolve_animation_model(resolved_model, resolved_openai_mode)
+                if animation_model and animation_model != resolved_model:
+                    self.ctx.logger.info(
+                        "edit_image 动图请求改用支持 GIF 的模型: original_model=%s model=%s",
+                        resolved_model,
+                        animation_model,
+                    )
+                    resolved_model = animation_model
             provider_name = router.get_model_provider(resolved_model)
             if not provider_name:
                 await self._send_draw_failure_notice(

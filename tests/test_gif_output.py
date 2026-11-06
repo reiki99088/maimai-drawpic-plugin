@@ -331,3 +331,55 @@ def test_client_submits_animation_and_reads_gif_chunks(make_plugin, monkeypatch)
             await plugin.on_unload()
 
     asyncio.run(run())
+
+
+def test_resolve_animation_model_prefers_fallback_then_catalog() -> None:
+    router = router_for(["gpt-image-2", "gpt-image-2.6-sunburst", "gpt-image-2.6-flare"])
+    assert router.resolve_animation_model("gpt-image-2.6-sunburst") == "gpt-image-2.6-sunburst"
+    assert router.resolve_animation_model("gpt-image-2") == "gpt-image-2.6-sunburst"
+    router.config.general.fallback_models = ["gpt-image-2.6-flare"]
+    assert router.resolve_animation_model("gpt-image-2") == "gpt-image-2.6-flare"
+    assert router.resolve_animation_model("gpt-image-2", "chat_completions") == ""
+    assert router_for(["gpt-image-2"]).resolve_animation_model("gpt-image-2") == ""
+
+
+def test_unspecified_model_switches_to_gif_capable_model(make_plugin, monkeypatch) -> None:
+    async def run() -> None:
+        plugin, service, name, attempts = await gif_plugin(
+            make_plugin, monkeypatch, ["gpt-image-2", "gpt-image-2.6-sunburst", "gpt-image-2.6-flare"],
+            fallback_models=["gpt-image-2.6-flare"],
+        )
+        try:
+            context = dict(stream_id="gif-stream", user_id="12345", group_id="67890", platform="qq")
+            result = await plugin.handle_draw(prompt="blinking cat", animated=True, **context)
+            assert result["success"], result
+            await asyncio.gather(*tuple(service.background_tasks))
+            assert attempts[-1].model == f"{name}/gpt-image-2.6-flare" and attempts[-1].is_fallback is False
+
+            result = await plugin.handle_edit_image(
+                prompt="make it move", source_image_base64=b64(gif(2)), animated=True, **context,
+            )
+            assert result["success"], result
+            await asyncio.gather(*tuple(service.background_tasks))
+            assert attempts[-1].model == f"{name}/gpt-image-2.6-flare"
+
+            submitted = await plugin.drawpic_submit_v2(prompt="cat", animated=True, request_id="gif-switch-001")
+            await asyncio.gather(*tuple(service.background_tasks))
+            assert submitted["accepted"] and attempts[-1].model == f"{name}/gpt-image-2.6-flare"
+
+            plain = await plugin.handle_draw(prompt="still cat", **context)
+            assert plain["success"], plain
+            await asyncio.gather(*tuple(service.background_tasks))
+            assert attempts[-1].model == f"{name}/gpt-image-2" and attempts[-1].animation is None
+
+            explicit = await plugin.handle_draw(prompt="cat", model=f"{name}/gpt-image-2", animated=True, **context)
+            assert not explicit["success"] and f"{name}/gpt-image-2 " in explicit["message"]
+            refused = await plugin.drawpic_submit_v2(
+                prompt="cat", model=f"{name}/gpt-image-2", animated=True, request_id="gif-explicit-01",
+            )
+            assert refused["accepted"] is False and f"{name}/gpt-image-2 " in refused["error"]["message"]
+            assert len(attempts) == 4
+        finally:
+            await plugin.on_unload()
+
+    asyncio.run(run())

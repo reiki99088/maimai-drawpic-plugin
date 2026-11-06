@@ -5,7 +5,7 @@ from typing import Any
 ANIMATION_TOOL_PROPERTIES: dict[str, Any] = {
     "animated": {
         "type": "boolean",
-        "description": "可选，仅当用户明确要求动图/GIF/会动的图时传 true；只有 gpt-image-2.6 系列模型支持，其余模型会返回原因",
+        "description": "可选，仅当用户明确要求动图/GIF/会动的图时传 true；只有 gpt-image-2.6 系列模型支持，未指定 model 时会自动改用能出动图的模型，指定了不支持的模型会返回原因",
     },
     "frame_count": {
         "type": "integer",

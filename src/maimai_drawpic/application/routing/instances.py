@@ -1,6 +1,6 @@
 """在所有平台类型的命名实例之间路由，不共享不同实例的密钥或参数。"""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import asyncio
@@ -204,7 +204,11 @@ class InstanceProviderRouter(ProviderRouter):
 
     def evaluate_model_animation_capability(self, model: str, openai_compatibility_mode: str = "") -> ModelTaskCapability:
         route = self._route(model)
-        return route.router.evaluate_model_animation_capability(route.model, openai_compatibility_mode)
+        capability = route.router.evaluate_model_animation_capability(route.model, openai_compatibility_mode)
+        if capability.allowed:
+            return capability
+        # 子路由只认实例内模型名，报给用户时换回带平台前缀的完整名称。
+        return replace(capability, reason=capability.reason.replace(f"当前模型 {route.model} ", f"当前模型 {route.selector} ", 1))
 
     def validate_source_image_count(self, model: str, image_count: int) -> None:
         route = self._route(model)

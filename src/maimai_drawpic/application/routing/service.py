@@ -66,6 +66,15 @@ class ProviderRouter(ProviderConstructionMixin, ModelCatalogMixin, TaskCapabilit
                 reasons.append(f"生图备选模型未归属于任何已配置图片平台：{model}")
         return "；".join(reasons)
 
+    def resolve_animation_model(self, model: str, openai_compatibility_mode: str = "") -> str:
+        """未指定模型的动图请求：当前模型出不了 GIF 时，先按备选顺序、再按模型目录找第一个能出的；都没有返回空串。"""
+
+        candidates = [model, *self.resolve_fallback_models(model), *self.get_all_models()]
+        for candidate in dict.fromkeys(item for item in candidates if item):
+            if self.evaluate_model_animation_capability(candidate, openai_compatibility_mode).allowed:
+                return candidate
+        return ""
+
     def resolve_openai_compatibility_mode(self, mode: str = "", model: str = "") -> OpenAICompatibilityMode:
         """解析最终使用的 OpenAI 兼容模式。"""
 
