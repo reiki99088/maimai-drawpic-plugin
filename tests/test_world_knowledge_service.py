@@ -22,17 +22,26 @@ CARD = (
 
 
 class FakeLlm:
-    def __init__(self, *, extract: str = EXTRACT, card: str = CARD, verify: str = "结论：PASS", delay: float = 0) -> None:
+    def __init__(
+        self, *, extract: str = EXTRACT, card: str = CARD, verify: str = "结论：PASS", delay: float = 0,
+        truncate: str = "",
+    ) -> None:
         self.extract, self.card, self.verify, self.delay = extract, card, verify, delay
+        self.truncate = truncate  # 这一步的 completion_tokens 报成刚好用满 max_tokens
         self.calls: List[str] = []
+        self.prompts: Dict[str, str] = {}
+        self.max_tokens: Dict[str, int] = {}
 
     async def generate(self, prompt: Any, **kwargs) -> Dict[str, Any]:
         text = prompt if isinstance(prompt, str) else prompt[0]["content"][0]["text"]
         stage = "extract" if "绘图提示词：" in text else "card" if "整理一张绘图词条" in text else "verify"
         self.calls.append(stage)
+        self.prompts[stage] = text
+        self.max_tokens[stage] = kwargs["max_tokens"]
         if stage == "card" and self.delay:
             await asyncio.sleep(self.delay)
-        return {"success": True, "response": getattr(self, stage)}
+        used = kwargs["max_tokens"] if stage == self.truncate else 10
+        return {"success": True, "response": getattr(self, stage), "completion_tokens": used}
 
 
 class FakeWeb:
@@ -133,6 +142,48 @@ def test_nothing_extracted_means_no_search(tmp_path) -> None:
         service, ctx, _store = make_service(tmp_path, llm=FakeLlm(extract="无"))
         result = await service.prepare("画一只猫")
         assert result.entries == [] and ctx.web.queries == [] and ctx.llm.calls == ["extract"]
+        assert result.warnings == []
+
+    asyncio.run(run())
+
+
+def test_extract_sees_scene_after_long_preamble(tmp_path) -> None:
+    """漫画提示词前面是参考图说明和版式，真正的对象常在两千字之后。"""
+    async def run() -> None:
+        service, ctx, _store = make_service(tmp_path)
+        preamble = "[Reference images] image 1: 群友，白色女仆头饰。\n" * 120
+        result = await service.prepare(preamble + "Panel 3: 芙宁娜站在舞台中央。")
+        assert len(preamble) > 4000 and "芙宁娜站在舞台中央" in ctx.llm.prompts["extract"]
+        assert [entry["name"] for entry in result.entries] == ["芙宁娜"]
+
+    asyncio.run(run())
+
+
+def test_output_budgets_leave_room_for_thinking_models(tmp_path) -> None:
+    async def run() -> None:
+        service, ctx, _store = make_service(tmp_path)
+        await service.prepare("芙宁娜在唱歌")
+        assert ctx.llm.max_tokens["extract"] >= 2000 and ctx.llm.max_tokens["card"] >= 4000
+
+    asyncio.run(run())
+
+
+def test_truncated_empty_reply_is_reported_not_treated_as_none(tmp_path) -> None:
+    async def run() -> None:
+        service, ctx, _store = make_service(tmp_path, llm=FakeLlm(extract="", truncate="extract"))
+        result = await service.prepare("芙宁娜在唱歌")
+        assert result.entries == [] and ctx.web.queries == []
+        assert any("达到上限" in warning for warning in result.warnings)
+        assert "世界知识模型输出达到上限" in ctx.logger.warning.call_args[0][0]
+
+    asyncio.run(run())
+
+
+def test_unparsable_extract_reply_is_reported(tmp_path) -> None:
+    async def run() -> None:
+        service, _ctx, _store = make_service(tmp_path, llm=FakeLlm(extract="画面里有一位游戏角色芙宁娜。"))
+        result = await service.prepare("芙宁娜在唱歌")
+        assert result.entries == [] and any("格式不对" in warning for warning in result.warnings)
 
     asyncio.run(run())
 

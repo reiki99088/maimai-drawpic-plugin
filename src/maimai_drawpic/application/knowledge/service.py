@@ -43,6 +43,15 @@ IMAGE_SEARCH_MIN_SECONDS = 12
 PREVIEW_CONCURRENCY = 4
 PREVIEW_TIMEOUT_SECONDS = 10
 PICK_TIMEOUT_SECONDS = 45
+# 识别窗口：调用方常把参考图说明、版式写在前面，剧情和对白在后面，只看开头会漏掉真正的对象
+EXTRACT_TEXT_CHARS = 8000
+# 各步骤的输出上限。宿主模型多为思考模型，思考过程也计入输出 token，预算要给够，
+# 否则思考没结束就被截断，正文为空（11 月线上识别全部为空就是 400 太小）
+EXTRACT_MAX_TOKENS = 2000
+CARD_MAX_TOKENS = 4000
+PICK_MAX_TOKENS = 1000
+SCREEN_MAX_TOKENS = 1000
+VERIFY_MAX_TOKENS = 2000
 _RESULT_IMAGE_EDGE = 1280
 _REFERENCE_EDGE = 768
 _PICK_EDGE = 384
@@ -297,13 +306,18 @@ class WorldKnowledgeService:
         )
 
     async def _extract(self, text: str, deadline: float, result: WorldResolution) -> List[EntityMention]:
-        prompt = EXTRACT_PROMPT.format(max_entities=self.general.world_knowledge_max_entities, text=text[:2000])
+        prompt = EXTRACT_PROMPT.format(max_entities=self.general.world_knowledge_max_entities, text=text[:EXTRACT_TEXT_CHARS])
         try:
-            response = await self._generate(prompt, timeout_seconds=min(30.0, _left(deadline)), max_tokens=400)
+            response = await self._generate(
+                prompt, timeout_seconds=min(30.0, _left(deadline)), max_tokens=EXTRACT_MAX_TOKENS,
+            )
         except (_LlmError, TimeoutError) as exc:
             result.warn(f"识别现实对象失败：{str(exc) or '超时'}")
             return []
-        return parse_entities(response, self.general.world_knowledge_max_entities)
+        mentions = parse_entities(response, self.general.world_knowledge_max_entities)
+        if not mentions and not _says_none(response):
+            result.warn("识别现实对象失败：模型回复格式不对")
+        return mentions
 
     async def _search_and_card(
         self, items: Sequence[Tuple[EntityMention, Optional[Dict[str, Any]]]], deadline: float,
@@ -359,7 +373,7 @@ class WorldKnowledgeService:
                 materials.setdefault(mention.name, []).append((number, hit["title"], hit["text"][:MAX_MATERIAL_CHARS]))
         prompt = CARD_PROMPT.format(today=date.today().isoformat(), materials=render_materials(entities, materials))
         try:
-            response = await self._generate(prompt, timeout_seconds=min(45.0, _left(deadline)), max_tokens=1500)
+            response = await self._generate(prompt, timeout_seconds=min(45.0, _left(deadline)), max_tokens=CARD_MAX_TOKENS)
         except (_LlmError, TimeoutError) as exc:
             result.warn(f"整理词条失败：{str(exc) or '超时'}")
             return [entry for _mention, entry in items if entry is not None]
@@ -490,7 +504,7 @@ class WorldKnowledgeService:
         messages = await asyncio.to_thread(_pick_messages, prompt, previews)
         try:
             response = await self._generate(
-                messages, timeout_seconds=min(PICK_TIMEOUT_SECONDS, _left(deadline)), max_tokens=80,
+                messages, timeout_seconds=min(PICK_TIMEOUT_SECONDS, _left(deadline)), max_tokens=PICK_MAX_TOKENS,
                 model=self.general.world_knowledge_verify_model,
             )
         except (_LlmError, TimeoutError):
@@ -514,7 +528,7 @@ class WorldKnowledgeService:
         messages = await asyncio.to_thread(_image_messages, prompt, [image.data], _REFERENCE_EDGE)
         try:
             response = await self._generate(
-                messages, timeout_seconds=min(45.0, _left(deadline)), max_tokens=20,
+                messages, timeout_seconds=min(45.0, _left(deadline)), max_tokens=SCREEN_MAX_TOKENS,
                 model=self.general.world_knowledge_verify_model,
             )
         except (_LlmError, TimeoutError):
@@ -598,7 +612,7 @@ class WorldKnowledgeService:
         try:
             messages = await asyncio.to_thread(_verify_messages, prompt, image_bytes, references)
             response = await self._generate(
-                messages, timeout_seconds=VERIFY_TIMEOUT_SECONDS, max_tokens=400,
+                messages, timeout_seconds=VERIFY_TIMEOUT_SECONDS, max_tokens=VERIFY_MAX_TOKENS,
                 model=self.general.world_knowledge_verify_model,
             )
             verdict = parse_verdict(response)
@@ -633,7 +647,16 @@ class WorldKnowledgeService:
         if not isinstance(response, dict) or not response.get("success", False):
             error = response.get("error") if isinstance(response, dict) else ""
             raise _LlmError(sanitize_provider_text(error or "模型调用失败")[:120])
-        return str(response.get("response") or response.get("content") or "").strip()
+        content = str(response.get("response") or response.get("content") or "").strip()
+        truncated = _int(response.get("completion_tokens")) >= max_tokens
+        if truncated:
+            self.ctx.logger.warning(
+                "世界知识模型输出达到上限: model=%s max_tokens=%s content_chars=%s",
+                response.get("model_name") or model or self.general.world_knowledge_model, max_tokens, len(content),
+            )
+        if not content:  # 空回复不能当成「没有对象」「通过」之类的正常结论
+            raise _LlmError("模型输出达到上限，没有给出回答" if truncated else "模型没有给出回答")
+        return content
 
 
 # ---------------------------------------------------------------------------- 工具函数
@@ -642,6 +665,17 @@ class WorldKnowledgeService:
 def _mention_order(text: str, entry: Dict[str, Any]) -> int:
     position = entry_mention(text, entry)
     return position if position >= 0 else 1 << 30
+
+
+def _says_none(response: str) -> bool:
+    return any(line.strip().strip("。.") == "无" for line in response.splitlines())
+
+
+def _int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _left(deadline: float) -> float:
