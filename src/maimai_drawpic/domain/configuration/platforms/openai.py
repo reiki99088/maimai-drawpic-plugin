@@ -1,13 +1,15 @@
 """configuration/platforms/openai.py 的强类型配置定义。"""
 
-from maibot_sdk import Field, PluginConfigBase
+from maibot_sdk import Field
 from pydantic import field_validator
 from typing import Any, Literal
 
 from ...models.openai_profiles import OpenAICompatibilityMode, normalize_openai_mode, normalize_openai_request_mode
 
+from .common import NegativePromptConfig
 
-class OpenAICompatibleInstanceConfig(PluginConfigBase):
+
+class OpenAICompatibleInstanceConfig(NegativePromptConfig):
     """OpenAI 兼容接口实例配置。"""
 
     # 必填项：缺一项实例就无法正常调用
@@ -57,7 +59,7 @@ class OpenAICompatibleInstanceConfig(PluginConfigBase):
             "x-widget": "textarea",
             "rows": 3,
             "placeholder": "gpt-image-2.5, platform-gpt=gpt-image-2.5",
-            "hint": "WebUI 内为单行输入，多个模型用 , 或 ， 分隔；TOML 源代码模式可换行",
+            "hint": "多个模型用逗号分隔。",
             "order": 4,
         },
     )
@@ -140,7 +142,7 @@ class OpenAICompatibleInstanceConfig(PluginConfigBase):
             "x-widget": "textarea",
             "rows": 3,
             "placeholder": "gpt-image-2.5=1024x1024, gemini-image=1536x1024",
-            "hint": "WebUI 内为单行输入，多条用 , 或 ， 分隔；TOML 源代码模式可换行",
+            "hint": "多项用逗号分隔。",
             "order": 8,
         },
     )
@@ -211,13 +213,13 @@ class OpenAICompatibleInstanceConfig(PluginConfigBase):
             "x-widget": "textarea",
             "rows": 3,
             "placeholder": "custom_field=true, extra_option=auto",
-            "hint": "WebUI 内为单行输入，多条用 , 或 ， 分隔；TOML 源代码模式可换行",
+            "hint": "多项用逗号分隔。",
             "order": 15,
         },
     )
 
 
-class OpenAIModelConfig(PluginConfigBase):
+class OpenAIModelConfig(NegativePromptConfig):
     """OpenAI 模型配置。"""
 
     __ui_label__ = "OpenAI 配置"
@@ -249,7 +251,7 @@ class OpenAIModelConfig(PluginConfigBase):
         description="是否启用此平台实例。关闭后不影响其他平台实例",
         json_schema_extra={
             "label": "启用此平台实例",
-            "hint": "关闭后，此实例的模型不参与路由；其他平台实例仍可单独启用",
+            "hint": "关闭后，该平台的模型将不可选。",
             "order": -1,
         },
     )

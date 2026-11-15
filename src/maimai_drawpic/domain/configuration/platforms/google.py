@@ -1,9 +1,11 @@
 """configuration/platforms/google.py 的强类型配置定义。"""
 
-from maibot_sdk import Field, PluginConfigBase
+from maibot_sdk import Field
+
+from .common import NegativePromptConfig
 
 
-class GoogleModelConfig(PluginConfigBase):
+class GoogleModelConfig(NegativePromptConfig):
     """Google 模型配置。"""
 
     __ui_label__ = "Google 配置"
@@ -14,7 +16,7 @@ class GoogleModelConfig(PluginConfigBase):
         description="是否启用 Google 平台",
         json_schema_extra={
             "label": "启用 Google 平台",
-            "hint": "关闭后，本节模型不会出现在可用模型列表，也不会参与路由",
+            "hint": "关闭后，该平台的模型将不可选。",
             "order": -1,
         },
     )
@@ -63,16 +65,6 @@ class GoogleModelConfig(PluginConfigBase):
             "hint": "可填 1K、2K、4K；Gemini 3.1 Flash 还支持 512。需使用大写 K，留空使用模型默认分辨率",
             "placeholder": "1K / 2K / 4K",
             "order": 5,
-        },
-    )
-    negative_prompt: str = Field(
-        default="",
-        description="Google 反向提示词",
-        json_schema_extra={
-            "label": "反向提示词",
-            "hint": "Gemini 不支持独立反向字段，插件会将反向内容合并到普通提示词",
-            "input_type": "textarea",
-            "order": 7,
         },
     )
     seed: int = Field(

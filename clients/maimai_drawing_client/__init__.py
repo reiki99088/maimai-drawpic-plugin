@@ -1,6 +1,9 @@
+# SPDX-FileCopyrightText: 2026 WhiteCloudOL
+# SPDX-License-Identifier: MIT
+
 """可整体复制的 MaiBot 绘图客户端，Python >=3.12，仅使用标准库。"""
 
 from .client import DrawingClient
-from .models import DrawingError, DrawingPreferences, DrawingRequest, DrawingResult, DrawingTransportError, GeneratedImage, TaskHandle
+from .models import DrawingError, DrawingPreferences, DrawingReferenceOptions, DrawingReferenceSettings, DrawingRequest, DrawingResult, DrawingTransportError, GeneratedImage, SimpleDrawingRequest, TaskHandle
 
-__all__ = ["DrawingClient", "DrawingError", "DrawingPreferences", "DrawingRequest", "DrawingResult", "DrawingTransportError", "GeneratedImage", "TaskHandle"]
+__all__ = ["DrawingClient", "DrawingError", "DrawingPreferences", "DrawingReferenceOptions", "DrawingReferenceSettings", "DrawingRequest", "DrawingResult", "DrawingTransportError", "GeneratedImage", "SimpleDrawingRequest", "TaskHandle"]

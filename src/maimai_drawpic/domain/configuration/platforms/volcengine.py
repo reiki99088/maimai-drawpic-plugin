@@ -1,11 +1,13 @@
 """configuration/platforms/volcengine.py 的强类型配置定义。"""
 
-from maibot_sdk import Field, PluginConfigBase
+from maibot_sdk import Field
 
 from ..types import VolcengineResponseFormat, VolcengineSequentialMode
 
+from .common import NegativePromptConfig
 
-class VolcengineModelConfig(PluginConfigBase):
+
+class VolcengineModelConfig(NegativePromptConfig):
     """火山引擎方舟模型配置。"""
 
     __ui_label__ = "火山引擎配置"
@@ -16,7 +18,7 @@ class VolcengineModelConfig(PluginConfigBase):
         description="是否启用火山引擎平台",
         json_schema_extra={
             "label": "启用火山引擎平台",
-            "hint": "关闭后，本节模型不会出现在可用模型列表，也不会参与路由",
+            "hint": "关闭后，该平台的模型将不可选。",
             "order": -1,
         },
     )

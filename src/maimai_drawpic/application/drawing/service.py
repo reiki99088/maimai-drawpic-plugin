@@ -20,6 +20,7 @@ from .queries import TaskQueryMixin
 from .admission import persist_submission, tracked_submission, wait_for_admission
 from ...domain.task_errors import ModelAccessError, task_error
 from ...domain.models.animation import AnimationOptions
+from ..references.service import ReferencePreparation
 
 
 class DrawService(
@@ -290,6 +291,7 @@ class DrawService(
         novelai_artist_tags: str = "",
         animation: AnimationOptions | None = None,
         request_negative_prompt: str = "",
+        style_negative_prompt_template: str = "",
         user_id: str = "",
         group_id: str = "",
         platform_name: str = "qq",
@@ -303,6 +305,7 @@ class DrawService(
         submission: Optional[Dict[str, Any]] = None,
         restricted_models_allowed: bool = False,
         world_knowledge: bool | None = None,
+        reference_preparation: Optional[ReferencePreparation] = None,
     ) -> dict[str, Any]:
         """启动后台绘图任务，源图为空时文生图，存在源图时图生图。
 
@@ -326,6 +329,10 @@ class DrawService(
             raise ValueError("源图 URL 数量必须与源图数量一致")
         is_image_edit = bool(normalized_source_images)
         task_type = "edit_image" if is_image_edit else "draw"
+        if reference_preparation is not None:
+            task_type = reference_preparation.expected_mode or task_type
+            if not reference_preparation.expected_mode and not self.router.evaluate_model_task_capability(resolved_model, task_type).allowed:
+                task_type = "edit_image"
 
         primary_attempt = self._build_image_request_attempt(
             model=resolved_model,
@@ -393,6 +400,7 @@ class DrawService(
                 novelai_artist_tags=novelai_artist_tags,
                 animation=animation,
                 request_negative_prompt=request_negative_prompt,
+                style_negative_prompt_template=style_negative_prompt_template,
                 source_image_bytes_list=normalized_source_images,
                 source_image_urls=normalized_source_urls,
                 matched_message_id=matched_message_id,
@@ -404,6 +412,7 @@ class DrawService(
                 on_task_successful=on_task_successful,
                 restricted_models_allowed=restricted_models_allowed,
                 world_knowledge=world_knowledge,
+                reference_preparation=reference_preparation,
             ),
             name=f"maimai-drawpic:{task_record.task_id}",
         )

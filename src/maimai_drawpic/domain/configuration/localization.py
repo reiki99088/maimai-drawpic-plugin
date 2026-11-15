@@ -8,6 +8,7 @@ from typing import Dict, Tuple, Type
 _LOCALES = ("en_US", "ja_JP", "ko_KR")
 
 _SECTION_TEXTS: Dict[str, Tuple[Tuple[str, str, str], Tuple[str, str, str]]] = {
+    "MiniMaxModelConfig": (("MiniMax Settings", "MiniMax 設定", "MiniMax 설정"), ("Official MiniMax image models.", "MiniMax 公式画像モデルの設定。", "MiniMax 공식 이미지 모델 설정.")),
     "AgnesModelConfig": (
         ("Agnes Settings", "Agnes 設定", "Agnes 설정"),
         ("Agnes image generation and editing.", "Agnes の画像生成・編集設定です。", "Agnes 이미지 생성 및 편집 설정입니다."),
@@ -167,6 +168,11 @@ _FIELD_LABELS: Dict[str, Tuple[str, str, str]] = {
     "resume_enabled": ("Resume Source Session for Edits", "再調整で元のセッションを継続", "재조정 시 원래 세션 이어가기"),
     "task_timeout_seconds": ("Task Timeout (Seconds)", "タスクのタイムアウト（秒）", "작업 시간 제한(초)"),
     "thread_retention_days": ("Session Retention (Days)", "セッション保持日数", "세션 보존 일수"),
+    "integration_api_enabled": ("Plugin Integration API", "プラグイン連携 API", "플러그인 연동 API"),
+    "group_access_mode": ("Group List Mode", "グループ一覧モード", "그룹 목록 모드"),
+    "group_access_ids": ("Group Access List", "グループアクセス一覧", "그룹 접근 목록"),
+    "private_access_mode": ("Private Chat List Mode", "個人チャット一覧モード", "개인 대화 목록 모드"),
+    "private_access_ids": ("Private Chat Access List", "個人チャットアクセス一覧", "개인 대화 접근 목록"),
     "prompt_review_retry_count": ("Prompt Review Retries", "プロンプト審査の再試行回数", "프롬프트 검토 재시도 횟수"),
     "image_review_retry_count": ("Image Review Retries", "画像審査の再試行回数", "이미지 검토 재시도 횟수"),
     "prompt_review_model": ("Prompt Review Model", "プロンプト審査モデル", "프롬프트 검토 모델"),
@@ -195,6 +201,9 @@ _FIELD_LABELS: Dict[str, Tuple[str, str, str]] = {
         "중국 제공자 프록시 우회",
     ),
     "command_reply_mode": ("Command Reply Mode", "コマンド応答モード", "명령 응답 모드"),
+    "sync_generated_images_to_history": (
+        "Sync Generated Images to Chat History", "生成画像を会話履歴に同期", "생성 이미지를 대화 기록에 동기화",
+    ),
     "config_version": ("Configuration Version", "設定バージョン", "설정 버전"),
     "custom_models": ("Custom Models", "カスタムモデル", "사용자 지정 모델"),
     "default_artist_tags": ("Default Artist Tags", "既定のアーティストタグ", "기본 아티스트 태그"),
@@ -278,7 +287,8 @@ _FIELD_LABELS: Dict[str, Tuple[str, str, str]] = {
     "models": ("Models", "モデル一覧", "모델 목록"),
     "moderation": ("Moderation Level", "モデレーション強度", "검토 강도"),
     "name": ("Name", "名前", "이름"),
-    "negative_prompt": ("Negative Prompt", "ネガティブプロンプト", "네거티브 프롬프트"),
+    "negative_prompt": ("Default Negative Prompt (Optional)", "既定のネガティブプロンプト（任意）", "기본 네거티브 프롬프트(선택 사항)"),
+    "negative_prompt_enabled": ("Enable Negative Prompts", "ネガティブプロンプトを有効化", "네거티브 프롬프트 활성화"),
     "negative_prompt_template": (
         "Negative Prompt Template",
         "ネガティブプロンプトテンプレート",
@@ -385,6 +395,33 @@ _FIELD_LABELS: Dict[str, Tuple[str, str, str]] = {
 }
 
 _FIELD_LABEL_OVERRIDES: Dict[str, Tuple[str, str, str]] = {
+    "SiliconFlowModelConfig.watermark_enabled": (
+        "Enable Visible AI-generated Watermark",
+        "AI 生成の可視透かしを有効化",
+        "AI 생성 표시 워터마크 활성화",
+    ),
+    "MiniMaxModelConfig.enabled": ("Enabled", "有効", "활성화"),
+    "MiniMaxModelConfig.api_key": ("API Key", "API キー", "API 키"),
+    "MiniMaxModelConfig.base_url": ("API Base URL", "API 基本 URL", "API 기본 URL"),
+    "MiniMaxModelConfig.models": ("Models", "モデル", "모델"),
+    "MiniMaxModelConfig.size": ("Output Size", "出力サイズ", "출력 크기"),
+    "MiniMaxModelConfig.model_size_overrides": ("Per-model Sizes", "モデル別サイズ", "모델별 크기"),
+    "MiniMaxModelConfig.aspect_ratio": ("Aspect Ratio", "アスペクト比", "화면 비율"),
+    "MiniMaxModelConfig.area": ("H3 Area", "H3 面積", "H3 면적"),
+    "MiniMaxModelConfig.n": ("Image Count", "生成枚数", "생성 수"),
+    "MiniMaxModelConfig.response_format": ("Response Format", "応答形式", "응답 형식"),
+    "MiniMaxModelConfig.output_format": ("H3 Output Format", "H3 出力形式", "H3 출력 형식"),
+    "MiniMaxModelConfig.output_compression": ("H3 Compression Quality", "H3 圧縮品質", "H3 압축 품질"),
+    "MiniMaxModelConfig.stream": ("H3 Streaming", "H3 ストリーミング", "H3 스트리밍"),
+    "MiniMaxModelConfig.disable_prompt_enhanced": ("Disable H3 Prompt Enhancement", "H3 プロンプト強化を無効化", "H3 프롬프트 강화 비활성화"),
+    "MiniMaxModelConfig.prompt_optimizer": ("image-01 Prompt Optimizer", "image-01 プロンプト最適化", "image-01 프롬프트 최적화"),
+    "MiniMaxModelConfig.seed": ("image-01 Seed", "image-01 シード", "image-01 시드"),
+    "MiniMaxModelConfig.style_type": ("image-01-live Style", "image-01-live スタイル", "image-01-live 스타일"),
+    "MiniMaxModelConfig.style_weight": ("image-01-live Style Weight", "image-01-live スタイル強度", "image-01-live 스타일 가중치"),
+    "MiniMaxModelConfig.aigc_watermark": ("Visible AIGC Watermark", "AIGC 可視透かし", "AIGC 표시 워터마크"),
+    "MiniMaxModelConfig.request_timeout_seconds": ("MiniMax Request Timeout", "MiniMax リクエスト制限時間", "MiniMax 요청 제한 시간"),
+    "MiniMaxModelConfig.extra_parameters": ("Extra Parameters", "追加パラメータ", "추가 매개변수"),
+    "MiniMaxModelConfig.rewrite_prompt_to_english": ("Rewrite Prompt in English", "英語プロンプトに変換", "영어 프롬프트로 변환"),
     "PluginSectionConfig.enabled": ("Enable Plugin", "プラグインを有効化", "플러그인 활성화"),
     "StylePresetConfig.enabled": ("Enable Preset", "プリセットを有効化", "프리셋 활성화"),
     "ProxyConfig.enabled": ("Enable Global Proxy", "共通プロキシを有効化", "전역 프록시 활성화"),
@@ -705,6 +742,128 @@ _FIELD_HINT_OVERRIDES: Dict[str, Tuple[str, str, str]] = {
         "毎回のリクエストに付加する固定指示です。ツールと安全上の制限はプラグインが常に適用します。",
         "모든 요청에 덧붙이는 고정 지침입니다. 도구와 보안 제한은 플러그인이 항상 적용합니다.",
     ),
+    "ReferenceConfig.material_model": (
+        "A fast multimodal model is recommended. Use planner, replyer, vlm, or a configured MaiBot model name.",
+        "高速なマルチモーダルモデルを推奨します。planner、replyer、vlm、またはMaiBotに設定済みのモデル名を指定できます。",
+        "빠른 멀티모달 모델을 권장합니다. planner, replyer, vlm 또는 MaiBot에 설정된 모델 이름을 사용할 수 있습니다.",
+    ),
+    "ReferenceConfig.web_search_provider": (
+        "MaiBot uses the host's configured search service. DeepSeek uses a separate API key.",
+        "MaiBotはホストの検索設定を使い、DeepSeekは別途入力したAPIキーを使います。",
+        "MaiBot은 호스트의 검색 서비스를 사용하고 DeepSeek은 별도 API 키를 사용합니다.",
+    ),
+    "ReferenceConfig.deepseek_api_key": (
+        "Leave empty to keep the saved key. Search API returns web pages; candidate images are extracted from them.",
+        "空欄では保存済みキーを保持します。Search APIのウェブ結果から候補画像を抽出します。",
+        "비워 두면 저장된 키를 유지합니다. Search API가 반환한 웹 페이지에서 후보 이미지를 추출합니다.",
+    ),
+    "ReferenceConfig.allow_chat_material_search": (
+        "Read prior images only for clear follow-up edits or regeneration requests.",
+        "前図の編集・再生成を明確に続ける場合だけ履歴画像を探します。",
+        "이전 그림의 수정이나 재생성을 명확히 이어갈 때만 대화 이미지를 찾습니다.",
+    ),
+    "ReferenceConfig.self_reference_ids": (
+        "Leave empty to select one image by gallery tags, using the default image when no tag matches. Select images only to keep a fixed appearance.",
+        "空欄ではギャラリーのタグで1枚を選び、一致しなければ既定画像を使います。外見を固定する場合に画像を選択してください。",
+        "비워 두면 갤러리 태그로 한 장을 선택하고 일치하지 않으면 기본 이미지를 사용합니다. 외형을 고정하려면 이미지를 선택하세요.",
+    ),
+    "StylePresetConfig.tags": (
+        "Keywords for automatic selection, such as watercolor. More matching tags take priority; ties follow list order. With no match, use the default preset. Explicit preset choices ignore tags.",
+        "水彩など、自動選択に使うキーワードです。一致数が多い項目を優先し、同数ならリスト順、一致なしなら既定項目を使います。手動選択はタグに依存しません。",
+        "수채화 같은 자동 선택 키워드입니다. 일치 태그가 많은 항목을 우선하고 동점이면 목록 순서, 일치하지 않으면 기본 프리셋을 사용합니다. 직접 선택은 태그와 무관합니다.",
+    ),
+    "StylePresetConfig.description": (
+        "Describe the look and suitable scenes to help users and the chat model choose a style. Web automatic selection uses tags.",
+        "見た目や適した場面を説明し、ユーザーとチャットモデルの選択を助けます。Webの自動選択はタグを使います。",
+        "시각적 특징과 적합한 장면을 설명하여 사용자와 대화 모델의 스타일 선택을 돕습니다. 웹 자동 선택은 태그를 사용합니다.",
+    ),
+    "ReferenceConfig.chat_material_search_limit": (
+        "Recommended: 50 messages; range: 1–200. Search only the current chat within the last 24 hours and select at most 6 candidate images.",
+        "推奨は50件、設定範囲は1～200件です。現在のチャットの直近24時間のみ検索し、候補画像は最大6枚です。",
+        "권장값은 50개이며 1~200개로 설정할 수 있습니다. 현재 대화의 최근 24시간만 검색하고 후보 이미지는 최대 6장 선택합니다.",
+    ),
+    "ReferenceConfig.allow_web_material_search": (
+        "Search only for named characters, specific objects or explicit reference requests.",
+        "指定キャラ、特定物品、明示的な参照画像探しのみ検索します。",
+        "지정 캐릭터, 특정 물건 또는 명시적인 참고 이미지 요청만 검색합니다.",
+    ),
+    "ReferenceConfig.self_keywords": (
+        "For example: selfie, draw, drawing. Matching tags remind the planner to consider drawing; bot identity still depends on meaning. Add with Enter or commas; leave empty to disable reminders.",
+        "例：自撮り、描いて、作画。一致したら描画の判断を促し、自身かどうかは文意で判断します。Enterまたはカンマで追加、空欄で通知を無効にします。",
+        "예: 셀카, 그려, 그림. 일치하면 그림 요청인지 판단하도록 알리며 봇 자신인지는 의미로 구분합니다. Enter 또는 쉼표로 추가하고 비우면 알림을 끕니다.",
+    ),
+    "SiliconFlowModelConfig.watermark_enabled": (
+        "Enabled by default. The invisible watermark remains when disabled.",
+        "既定は有効です。無効にしても不可視の透かしは残ります。",
+        "기본적으로 켜져 있으며 꺼도 비표시 워터마크는 유지됩니다.",
+    ),
+    "MiniMaxModelConfig.enabled": ("Enabled. See the MiniMax model-specific limits in the platform guide.", "有効。モデルごとの制約はプラットフォームガイドを参照してください。", "활성화. 모델별 제한은 플랫폼 가이드를 참조하세요."),
+    "MiniMaxModelConfig.api_key": ("API Key. See the MiniMax model-specific limits in the platform guide.", "API キー。モデルごとの制約はプラットフォームガイドを参照してください。", "API 키. 모델별 제한은 플랫폼 가이드를 참조하세요."),
+    "MiniMaxModelConfig.base_url": ("API Base URL. See the MiniMax model-specific limits in the platform guide.", "API 基本 URL。モデルごとの制約はプラットフォームガイドを参照してください。", "API 기본 URL. 모델별 제한은 플랫폼 가이드를 참조하세요."),
+    "MiniMaxModelConfig.models": ("Defaults to MiniMax-H3-Image. Add H3 Highspeed or image-01 variants from the documented presets; image-01 editing is character reference only.", "既定は MiniMax-H3-Image。公式プリセットから他の H3/image-01 を追加できます。image-01 の編集は人物参照です。", "기본 모델은 MiniMax-H3-Image입니다. 공식 문서 프리셋에서 다른 H3/image-01 모델을 추가하세요. image-01 편집은 인물 참조입니다."),
+    "MiniMaxModelConfig.size": ("auto or WIDTHxHEIGHT. H3 explicit dimensions cannot be combined with aspect_ratio/area. image-01 dimensions must be multiples of 8 in 512–2048; not supported by live.", "auto または 幅x高さ。H3 の固定サイズは比率・面積と併用不可。image-01 は 512～2048 の8の倍数、live は固定サイズ不可。", "auto 또는 너비x높이. H3 고정 크기는 비율/면적과 함께 사용할 수 없습니다. image-01은 512~2048 범위의 8의 배수이며 live에는 고정 크기를 지원하지 않습니다."),
+    "MiniMaxModelConfig.model_size_overrides": ("Per-model Sizes. See the MiniMax model-specific limits in the platform guide.", "モデル別サイズ。モデルごとの制約はプラットフォームガイドを参照してください。", "모델별 크기. 모델별 제한은 플랫폼 가이드를 참조하세요."),
+    "MiniMaxModelConfig.aspect_ratio": ("Aspect Ratio. See the MiniMax model-specific limits in the platform guide.", "アスペクト比。モデルごとの制約はプラットフォームガイドを参照してください。", "화면 비율. 모델별 제한은 플랫폼 가이드를 참조하세요."),
+    "MiniMaxModelConfig.area": ("H3 only, with size=auto. Leave blank for the server default of 4K; choose 1K/2K to reduce output area.", "H3 の size=auto のみ。空欄はサーバー既定の 4K。面積を抑えるには 1K/2K を選択します。", "H3의 size=auto에서만 사용합니다. 비우면 서버 기본 4K이며 면적을 줄이려면 1K/2K를 선택하세요."),
+    "MiniMaxModelConfig.n": ("H3: 1–10; image-01: 1–9. Partial success returns only successful images without regenerating failed items.", "H3 は1～10枚、image-01 は1～9枚。部分成功時は成功画像のみ返し、失敗分を再生成しません。", "H3는 1~10장, image-01은 1~9장입니다. 일부 성공 시 성공한 이미지만 반환하고 실패 이미지를 다시 생성하지 않습니다."),
+    "MiniMaxModelConfig.response_format": ("Response Format. See the MiniMax model-specific limits in the platform guide.", "応答形式。モデルごとの制約はプラットフォームガイドを参照してください。", "응답 형식. 모델별 제한은 플랫폼 가이드를 참조하세요."),
+    "MiniMaxModelConfig.output_format": ("H3 Output Format. See the MiniMax model-specific limits in the platform guide.", "H3 出力形式。モデルごとの制約はプラットフォームガイドを参照してください。", "H3 출력 형식. 모델별 제한은 플랫폼 가이드를 참조하세요."),
+    "MiniMaxModelConfig.output_compression": ("H3 Compression Quality. See the MiniMax model-specific limits in the platform guide.", "H3 圧縮品質。モデルごとの制約はプラットフォームガイドを参照してください。", "H3 압축 품질. 모델별 제한은 플랫폼 가이드를 참조하세요."),
+    "MiniMaxModelConfig.stream": ("H3 only and URL responses only. Results are collected in image-index order; interrupted streams never resubmit generation.", "H3 の URL 応答のみ。画像番号順に収集し、ストリーム切断時も再生成しません。", "H3의 URL 응답에만 적용됩니다. 이미지 인덱스 순서로 수집하며 스트림 중단 시 다시 생성하지 않습니다."),
+    "MiniMaxModelConfig.disable_prompt_enhanced": ("H3 text-to-image only. Disabling enhancement requires explicit dimensions or a fixed ratio. Editing always uses enhancement.", "H3 文生図のみ。無効化時は固定サイズか比率が必須。画像編集は常に強化を使用します。", "H3 텍스트 이미지 생성에만 적용됩니다. 끄려면 고정 크기나 비율을 지정해야 하며 편집은 항상 강화를 사용합니다."),
+    "MiniMaxModelConfig.prompt_optimizer": ("image-01 Prompt Optimizer. See the MiniMax model-specific limits in the platform guide.", "image-01 プロンプト最適化。モデルごとの制約はプラットフォームガイドを参照してください。", "image-01 프롬프트 최적화. 모델별 제한은 플랫폼 가이드를 참조하세요."),
+    "MiniMaxModelConfig.seed": ("image-01 only. -1 omits the parameter; zero is a valid seed. H3 does not declare a seed parameter.", "image-01 のみ。-1 は未送信、0 は有効です。H3 は seed 非対応です。", "image-01에만 사용합니다. -1이면 생략하며 0은 유효한 시드입니다. H3는 seed를 지원하지 않습니다."),
+    "MiniMaxModelConfig.style_type": ("image-01-live Style. See the MiniMax model-specific limits in the platform guide.", "image-01-live スタイル。モデルごとの制約はプラットフォームガイドを参照してください。", "image-01-live 스타일. 모델별 제한은 플랫폼 가이드를 참조하세요."),
+    "MiniMaxModelConfig.style_weight": ("image-01-live Style Weight. See the MiniMax model-specific limits in the platform guide.", "image-01-live スタイル強度。モデルごとの制約はプラットフォームガイドを参照してください。", "image-01-live 스타일 가중치. 모델별 제한은 플랫폼 가이드를 참조하세요."),
+    "MiniMaxModelConfig.aigc_watermark": ("Visible AIGC Watermark. See the MiniMax model-specific limits in the platform guide.", "AIGC 可視透かし。モデルごとの制約はプラットフォームガイドを参照してください。", "AIGC 표시 워터마크. 모델별 제한은 플랫폼 가이드를 참조하세요."),
+    "MiniMaxModelConfig.request_timeout_seconds": ("Instance timeout in seconds, default/minimum 600. MiniMax is non-idempotent: timeout and result-read failures never regenerate.", "インスタンスごとの秒数、既定・最小600秒。MiniMax は冪等でなく、タイムアウトや結果読込失敗時も再生成しません。", "인스턴스별 제한 시간(초)으로 기본/최솟값은 600입니다. MiniMax는 멱등하지 않으며 시간 초과나 결과 읽기 실패 시 다시 생성하지 않습니다."),
+    "MiniMaxModelConfig.extra_parameters": ("KEY=VALUE extensions. Cannot replace model, prompt or source images, or mix known H3/image-01 protocol fields.", "名前=値。モデル・プロンプト・元画像の上書きや H3/image-01 の異なるプロトコル項目の混在は禁止です。", "이름=값 형식의 확장입니다. 모델, 프롬프트, 원본 이미지를 덮어쓰거나 H3/image-01의 서로 다른 프로토콜 필드를 혼합할 수 없습니다."),
+    "MiniMaxModelConfig.rewrite_prompt_to_english": ("Rewrite Prompt in English. See the MiniMax model-specific limits in the platform guide.", "英語プロンプトに変換。モデルごとの制約はプラットフォームガイドを参照してください。", "영어 프롬프트로 변환. 모델별 제한은 플랫폼 가이드를 참조하세요."),
+    "GeneralConfig.integration_api_enabled": (
+        "On by default. Disable all public plugin integration APIs. Workspace, chat commands and AI tools remain available. Accepted tasks continue.",
+        "既定は有効です。無効にすると公開連携 API を拒否します。ワークスペース、コマンド、AI ツールは使用可能で、受理済みタスクは継続します。",
+        "기본적으로 켜져 있습니다. 끄면 모든 공개 연동 API를 거부합니다. 작업 공간, 명령, AI 도구는 계속 사용할 수 있으며 접수된 작업도 계속 실행됩니다.",
+    ),
+    "GeneralConfig.group_access_mode": (
+        "Blacklist by default: an empty list allows all groups. An empty whitelist denies all groups. Administrators follow the same rules.",
+        "既定はブラックリストで、空欄なら全グループを許可します。空のホワイトリストは全グループを拒否します。管理者も対象です。",
+        "기본은 차단 목록이며 빈 목록은 모든 그룹을 허용합니다. 빈 허용 목록은 모든 그룹을 거부합니다. 관리자에게도 적용됩니다.",
+    ),
+    "GeneralConfig.group_access_ids": (
+        "One group number per entry; use group OpenID for the official QQ adapter. Do not enter stream IDs, session hashes or member QQ numbers.",
+        "各項目にグループ番号を入力します。QQ 公式アダプターはグループ OpenID を使用します。stream ID、会話ハッシュ、メンバー番号は不要です。",
+        "항목마다 그룹 번호를 입력합니다. QQ 공식 어댑터는 그룹 OpenID를 사용합니다. 스트림 ID, 대화 해시, 멤버 QQ 번호는 입력하지 마세요.",
+    ),
+    "GeneralConfig.private_access_mode": (
+        "Blacklist by default: an empty list allows all private chats. An empty whitelist denies all private chats. Does not restrict users inside groups.",
+        "既定はブラックリストで、空欄なら全個人チャットを許可します。空のホワイトリストは全個人チャットを拒否します。グループ内での利用には影響しません。",
+        "기본은 차단 목록이며 빈 목록은 모든 개인 대화를 허용합니다. 빈 허용 목록은 모든 개인 대화를 거부합니다. 그룹 내 사용에는 영향을 주지 않습니다.",
+    ),
+    "GeneralConfig.private_access_ids": (
+        "One QQ number per entry; use user OpenID for the official QQ adapter. No stream ID or session hash is needed. OpenIDs are matched exactly.",
+        "各項目に QQ 番号を入力します。QQ 公式アダプターはユーザー OpenID を使用します。stream ID や会話ハッシュは不要です。OpenID は完全一致で照合します。",
+        "항목마다 QQ 번호를 입력합니다. QQ 공식 어댑터는 사용자 OpenID를 사용합니다. 스트림 ID나 대화 해시는 필요하지 않습니다. OpenID는 정확히 일치해야 합니다.",
+    ),
+    "GeneralConfig.sync_generated_images_to_history": (
+        "Off by default. After successful delivery, let a visual Planner view generated images; a text Planner uses image descriptions. May increase visual context and background recognition costs. Tasks without chat delivery and command reply cards are unaffected.",
+        "既定は無効です。送信成功後、視覚 Planner は生成画像を参照でき、テキスト Planner は画像説明を使用します。視覚コンテキストとバックグラウンド画像認識のコストが増える場合があります。会話に送信しないタスクとコマンド応答カードには適用しません。",
+        "기본적으로 꺼져 있습니다. 전송 성공 후 시각 Planner는 생성 이미지를 볼 수 있고 텍스트 Planner는 이미지 설명을 사용합니다. 시각 컨텍스트 및 백그라운드 이미지 인식 비용이 늘어날 수 있습니다. 대화로 전송하지 않는 작업과 명령 응답 카드에는 적용하지 않습니다.",
+    ),
+    "StyleConfig.default_style": (
+        "Automatically applied when AI tools, ordinary drawing commands, the workspace or plugin APIs omit a style. Select an enabled preset. Leave blank to disable automatic styling; explicitly choose no style to skip it for one request.",
+        "AI ツール、通常の描画コマンド、ワークスペース、プラグイン API でスタイル未指定の場合に自動適用します。有効なプリセットを選択してください。空欄は自動適用なしで、明示的にスタイルなしを選べば今回だけ省略できます。",
+        "AI 도구, 일반 그리기 명령, 작업 공간, 플러그인 API가 스타일을 생략하면 자동 적용합니다. 활성 프리셋을 선택하세요. 비워 두면 자동 적용하지 않으며 명시적으로 스타일 없음을 선택하면 이번 요청에서 건너뜁니다.",
+    ),
+    "negative_prompt_enabled": (
+        "When disabled, ignore negative prompts from AI tools, commands, the workspace and APIs, including this instance's defaults. Style presets keep their own positive and negative content.",
+        "無効時は AI ツール、コマンド、ワークスペース、API のネガティブプロンプトと、このインスタンスの既定値を無視します。スタイル固有の正負プロンプトは保持されます。",
+        "비활성화하면 AI 도구, 명령, 작업 공간, API의 네거티브 프롬프트와 이 인스턴스의 기본값을 무시합니다. 스타일 자체의 긍정 및 부정 내용은 유지됩니다.",
+    ),
+    "negative_prompt": (
+        "Used only when negative prompts are enabled. Append to the request, remove duplicate terms with the style preset, and include in English rewriting. Providers without a separate negative field receive the merged prompt.",
+        "ネガティブプロンプトが有効な場合のみ使用します。今回の入力に追加し、スタイルとの重複語を除去して英語書き換えにも含めます。専用フィールドのないサービスでは本文に統合します。",
+        "네거티브 프롬프트가 활성화된 경우에만 사용합니다. 요청 뒤에 추가하고 스타일과 중복되는 항목을 제거하며 영어 변환에도 포함합니다. 별도 필드가 없는 제공자는 본문에 합칩니다.",
+    ),
     "GeneralConfig.prompt_review_retry_count": (
         "Default: 2 extra retries, at most 3 calls. Range 0–5; 0 disables retries. Explicit rejection and cancellation never retry.",
         "既定は追加 2 回、最大 3 回の呼び出しです。範囲は 0～5、0 で無効。明確な拒否とキャンセルは再試行しません。",
@@ -786,14 +945,14 @@ _FIELD_HINT_OVERRIDES: Dict[str, Tuple[str, str, str]] = {
         "비활성화하면 이 인스턴스의 모델은 라우팅에서 제외됩니다. 다른 플랫폼 인스턴스는 개별적으로 활성화할 수 있습니다.",
     ),
     "StylePresetConfig.positive_prompt_template": (
-        "{prompt} inserts this request's drawing description. Keep it and add style words around it: watercolor, {prompt} + a cat becomes watercolor, a cat. Without it, the description is appended automatically. NovelAI {{tag}} weights are preserved.",
-        "{prompt} は今回の描画内容に置換されます。残したまま前後にスタイルを追加してください。例：水彩、{prompt} に「猫」を入力すると「水彩、猫」になります。削除した場合も描画内容を末尾に追加します。NovelAI の {{tag}} は保持されます。",
-        "{prompt}는 이번 요청의 그림 설명으로 바뀝니다. 유지하고 앞뒤에 스타일을 추가하세요. 예: 수채화, {prompt}에 고양이를 입력하면 수채화, 고양이가 됩니다. 삭제해도 설명을 뒤에 추가하며 NovelAI {{tag}} 가중치는 유지합니다.",
+        "{prompt} inserts the drawing description, for example watercolor, {prompt}. Without the placeholder, the description is appended.",
+        "{prompt} は今回の描画内容に置換されます。例：水彩、{prompt}。省略すると描画内容を末尾に追加します。",
+        "{prompt}는 이번 그림 설명으로 바뀝니다. 예: 수채화, {prompt}. 생략하면 설명을 뒤에 추가합니다.",
     ),
     "StylePresetConfig.negative_prompt_template": (
-        "{negative_prompt} inserts this request's unwanted content. Keep it: blurry, {negative_prompt} + watermark becomes blurry, watermark. Without it, the negative prompt is appended automatically; platforms without a separate negative field receive merged text.",
-        "{negative_prompt} は今回避けたい要素に置換されます。例：「ぼけ、{negative_prompt}」に「透かし」を入力すると「ぼけ、透かし」になります。残すことを推奨します。削除時も末尾に追加し、専用フィールドのないサービスでは本文に統合します。",
-        "{negative_prompt}는 이번 요청에서 제외할 내용으로 바뀝니다. 예: 흐림, {negative_prompt}에 워터마크를 입력하면 흐림, 워터마크가 됩니다. 유지하는 것을 권장하며 삭제해도 뒤에 추가합니다. 별도 필드가 없는 플랫폼은 본문에 합칩니다.",
+        "Describe unwanted content, for example blurry, {negative_prompt}. The placeholder inserts this request's negative prompt.",
+        "避けたい内容を入力します。例：ぼやけ、{negative_prompt}。今回のネガティブプロンプトを挿入します。",
+        "원치 않는 내용을 입력하세요. 예: 흐림, {negative_prompt}. 자리표시자에는 이번 제외 프롬프트를 넣습니다.",
     ),
     "PluginSectionConfig.image_cache_max_mb": (
         "Default 300 MB for originals and WebP previews in the plugin temporary directory. Old images are removed automatically; task records remain.",
@@ -826,14 +985,14 @@ _FIELD_HINT_OVERRIDES: Dict[str, Tuple[str, str, str]] = {
         "기본 추가 재시도 1회, 0~5회로 설정합니다. 연결 전 실패나 명시적 속도 제한 등 안전한 실패만 재시도합니다. 심사 거부, 결과 다운로드 실패, 원격 처리 상태 불명 시 재생성하지 않습니다.",
     ),
     "ComfyUIModelConfig.t2i_workflow_path": (
-        "The data/ prefix maps to the plugin data directory; default: data/workflows/t2i.json. Other relative paths remain relative to the plugin source directory. Absolute paths are supported. Export an API-format workflow from ComfyUI.",
-        "data/ 接頭辞はプラグインの標準データディレクトリに対応します。既定値は data/workflows/t2i.json。その他の相対パスはプラグインのソースディレクトリが基準です。絶対パスも使用できます。ComfyUI の API 形式でエクスポートしてください。",
-        "data/ 접두사는 플러그인 표준 데이터 디렉터리에 매핑됩니다. 기본값: data/workflows/t2i.json. 다른 상대 경로는 플러그인 소스 디렉터리 기준이며 절대 경로도 지원합니다. ComfyUI API 형식으로 내보내세요.",
+        "Default file: MaiBot/data/plugins/maimai-drawpic-plugin/workflows/t2i.json, under the MaiBot application root. Enter data/workflows/t2i.json here to use that file. This is not the plugin source directory's data folder. Export an API-format workflow from ComfyUI. Absolute paths are also supported.",
+        "既定のファイル：MaiBot 本体のルート配下の MaiBot/data/plugins/maimai-drawpic-plugin/workflows/t2i.json。この欄に data/workflows/t2i.json と入力すると、そのファイルを使用します。プラグインのソースディレクトリ内の data フォルダーではありません。ComfyUI の API 形式でエクスポートしてください。絶対パスも使用できます。",
+        "기본 파일: MaiBot 프로그램 루트 아래의 MaiBot/data/plugins/maimai-drawpic-plugin/workflows/t2i.json. 여기에 data/workflows/t2i.json을 입력하면 해당 파일을 사용합니다. 플러그인 소스 디렉터리의 data 폴더가 아닙니다. ComfyUI API 형식으로 내보내세요. 절대 경로도 지원합니다.",
     ),
     "ComfyUIModelConfig.i2i_workflow_path": (
-        "The data/ prefix maps to the plugin data directory; default: data/workflows/i2i.json. Other relative paths remain relative to the plugin source directory. Absolute paths are supported. Include a node that reads the uploaded image.",
-        "data/ 接頭辞はプラグインの標準データディレクトリに対応します。既定値は data/workflows/i2i.json。その他の相対パスはプラグインのソースディレクトリが基準です。絶対パスも使用できます。アップロード画像を読み込むノードが必要です。",
-        "data/ 접두사는 플러그인 표준 데이터 디렉터리에 매핑됩니다. 기본값: data/workflows/i2i.json. 다른 상대 경로는 플러그인 소스 디렉터리 기준이며 절대 경로도 지원합니다. 업로드 이미지를 읽는 노드가 필요합니다.",
+        "Default file: MaiBot/data/plugins/maimai-drawpic-plugin/workflows/i2i.json, under the MaiBot application root. Enter data/workflows/i2i.json here to use that file. This is not the plugin source directory's data folder. Use API-format JSON with a source-image node. Absolute paths are also supported.",
+        "既定のファイル：MaiBot 本体のルート配下の MaiBot/data/plugins/maimai-drawpic-plugin/workflows/i2i.json。この欄に data/workflows/i2i.json と入力すると、そのファイルを使用します。プラグインのソースディレクトリ内の data フォルダーではありません。元画像を読み込むノードを含む API 形式 JSON を使用してください。絶対パスも使用できます。",
+        "기본 파일: MaiBot 프로그램 루트 아래의 MaiBot/data/plugins/maimai-drawpic-plugin/workflows/i2i.json. 여기에 data/workflows/i2i.json을 입력하면 해당 파일을 사용합니다. 플러그인 소스 디렉터리의 data 폴더가 아닙니다. 원본 이미지 노드를 포함한 API 형식 JSON을 사용하세요. 절대 경로도 지원합니다.",
     ),
     "GoogleModelConfig.image_size": (
         "1K / 2K / 4K; Gemini 3.1 Flash also supports 512. Use uppercase K; leave blank for the model default.",
@@ -879,6 +1038,62 @@ _FIELD_HINT_OVERRIDES: Dict[str, Tuple[str, str, str]] = {
 }
 
 
+
+_FIELD_LABEL_OVERRIDES.update({
+    "StylePresetConfig.name": ("Preset name", "プリセット名", "프리셋 이름"),
+    "StylePresetConfig.description": ("Preset description", "プリセットの説明", "프리셋 설명"),
+    "StyleConfig.default_style": ("Default text-to-image preset", "文生図の既定プリセット", "기본 텍스트 이미지 프리셋"),
+    "StyleConfig.presets": ("Drawing presets", "描画プリセット", "그리기 프리셋"),
+})
+
+_FIELD_HINT_OVERRIDES.update({
+    "StyleConfig.default_style": ("Default for text-to-image. Image editing requires its preset switch and per-preset compatibility. Select none to skip.", "文生図の既定項目です。画像編集には総スイッチと各項目の互換設定が必要です。未使用を選択すると適用しません。", "텍스트 이미지의 기본값입니다. 이미지 편집에는 전체 스위치와 항목별 호환 설정이 필요합니다. 사용 안 함으로 건너뜁니다."),
+    "StyleConfig.presets": ("Both types share text templates. Image-edit presets may bind images and uses; text-to-image presets contain text only. Platform modes and session models stay unchanged.", "両種類で文字テンプレートを共有します。画像編集には画像と用途を紐付けられ、文生図は文字のみです。プラットフォームモードや会話モデルは変えません。", "두 유형은 텍스트 템플릿을 공유합니다. 이미지 편집에는 이미지와 용도를 연결할 수 있으며 텍스트 이미지에는 텍스트만 저장합니다. 플랫폼 모드와 대화 모델은 바꾸지 않습니다."),
+})
+
+_SECTION_TEXTS.update({
+    "StyleConfig": (("Drawing presets", "描画プリセット", "그리기 프리셋"), ("Text-to-image and optional image-edit presets.", "文生図と任意の画像編集プリセット。", "텍스트 이미지 및 선택적 이미지 편집 프리셋.")),
+    "ReferenceConfig": (("References and materials", "参照と素材", "참조 및 소재"), ("Self references and permitted sources.", "自身の参照画像と許可された素材元。", "자신의 참조 이미지와 허용된 소재 출처.")),
+    "ReferenceBindingConfig": (("Reference image use", "参照画像の用途", "참조 이미지 용도"), ("Image and subject binding.", "画像と被写体の対応。", "이미지와 대상 연결.")),
+})
+_FIELD_LABELS.update({
+    "web_search_provider": ("Search service", "検索サービス", "검색 서비스"),
+    "deepseek_api_key": ("DeepSeek API Key", "DeepSeek APIキー", "DeepSeek API 키"),
+    "material_model": ("Recognition model", "識別モデル", "인식 모델"),
+    "self_keywords": ("Trigger keywords", "トリガーキーワード", "트리거 키워드"),
+    "references": ("References and materials", "参照と素材", "참조 및 소재"),
+    "self_reference_enabled": ("Enable self references", "自身の参照を有効化", "자신의 참조 활성화"),
+    "self_names": ("Bot names and aliases", "ボットの名前と別名", "봇 이름 및 별칭"),
+    "self_reference_ids": ("Self reference images", "自身の参照画像", "자신의 참조 이미지"),
+    "multi_reference_confirmed": ("Multiple references confirmed", "複数参照を確認済み", "다중 참조 확인됨"),
+    "allow_chat_material_search": ("Allow chat materials", "チャット内の素材を許可", "대화 소재 허용"),
+    "chat_material_search_limit": ("Chat search limit (messages)", "チャット検索の上限（件）", "대화 검색 상한(메시지 수)"),
+    "allow_web_material_search": ("Allow web materials", "ウェブ素材を許可", "웹 소재 허용"),
+    "preset_type": ("Preset type", "プリセットの種類", "프리셋 유형"),
+    "tags": ("Tags", "タグ", "태그"),
+    "apply_to_image_edit": ("Also apply to image editing", "画像編集にも適用", "이미지 편집에도 적용"),
+    "reference_bindings": ("Preset reference images", "プリセットの参照画像", "프리셋 참조 이미지"),
+    "asset_id": ("Reference image", "参照画像", "참조 이미지"),
+    "role": ("Image use", "画像の用途", "이미지 용도"),
+    "subject_id": ("Subject", "被写体", "대상"),
+    "note": ("Use description", "用途の説明", "용도 설명"),
+    "image_edit_presets_enabled": ("Enable image editing presets", "画像編集プリセットを有効化", "이미지 편집 프리셋 활성화"),
+    "default_image_edit_preset": ("Default image editing preset", "画像編集の既定プリセット", "기본 이미지 편집 프리셋"),
+})
+
+_FIELD_HINT_OVERRIDES.update({
+    f"{name}.enabled": (
+        "When disabled, this platform's models cannot be selected.",
+        "無効にすると、このプラットフォームのモデルは選択できません。",
+        "끄면 이 플랫폼의 모델을 선택할 수 없습니다.",
+    )
+    for name in ("AliyunModelConfig", "GoogleModelConfig", "MiniMaxModelConfig", "NovelAIModelConfig", "SiliconFlowModelConfig", "OpenAIModelConfig", "VolcengineModelConfig", "ZhipuModelConfig")
+})
+_FIELD_HINT_OVERRIDES.update({
+    "ComfyUIModelConfig.poll_interval_seconds": ("Default: 1 second. A longer interval reduces polling frequency.", "既定は1秒です。間隔を長くすると確認頻度が下がります。", "기본값은 1초입니다. 간격을 늘리면 조회 빈도가 줄어듭니다."),
+    "NovelAIModelConfig.max_images": ("Images per request; 1–4 recommended.", "1回の生成枚数です。1～4枚を推奨します。", "한 번에 생성할 이미지 수입니다. 1~4장을 권장합니다."),
+})
+
 def _localized_field_entries(
     class_name: str,
     field_name: str,
@@ -898,8 +1113,9 @@ def _localized_field_entries(
         label = labels[index]
         localized: Dict[str, str] = {"label": label}
         if str(json_schema_extra.get("hint") or "").strip():
-            if field_path in _FIELD_HINT_OVERRIDES:
-                localized["hint"] = _FIELD_HINT_OVERRIDES[field_path][index]
+            hints = _FIELD_HINT_OVERRIDES.get(field_path, _FIELD_HINT_OVERRIDES.get(field_name))
+            if hints is not None:
+                localized["hint"] = hints[index]
             elif field_name == "default_openai_compatibility_mode":
                 localized["hint"] = _OPENAI_MODE_HINTS[index]
             elif locale == "en_US":

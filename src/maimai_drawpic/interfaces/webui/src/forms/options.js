@@ -2,6 +2,9 @@
   "use strict";
   const U = window.DrawpicUI;
   const labels = {
+    text_to_image: "文生图预设", image_to_image: "图生图预设",
+    identity: "人物身份", clothing: "服装", scene: "场景", lighting: "光线", composition: "构图", base: "待改底图",
+
     "": "使用平台默认（不传此参数）",
     auto: "自动",
     low: "低",
@@ -34,6 +37,8 @@
     weekly: "每周",
     monthly: "每月",
     once: "一次性",
+    blacklist: "黑名单",
+    whitelist: "白名单",
     base64: "直接传入图片数据",
     image_url: "使用原图链接",
     default: "使用 Codex 默认",
@@ -48,6 +53,11 @@
     vlm: "视觉任务组",
   };
   const presets = {
+    minimax: {
+      area: ["", "1K", "2K", "4K"],
+      aspect_ratio: ["", "auto", "1:1", "16:9", "4:3", "3:2", "2:3", "3:4", "9:16", "21:9"],
+      style_type: ["", "漫画", "元气", "中世纪", "水彩"],
+    },
     openai: {
       quality: ["", "auto", "low", "medium", "high", "standard", "hd"],
       response_format: ["", "b64_json", "url"],
@@ -100,7 +110,7 @@
   };
   function label(value) {
     if (value === "") return labels[""];
-    if (["daily", "weekly", "monthly", "once"].includes(value)) return labels[value];
+    if (["daily", "weekly", "monthly", "once", "blacklist", "whitelist", "text_to_image", "image_to_image", "identity", "clothing", "scene", "lighting", "composition", "base"].includes(value)) return labels[value];
     if (Object.hasOwn(labels, value)) return `${labels[value]} · ${value}`;
     const size = String(value).match(/^(\d+)[x*](\d+)$/);
     if (size)
@@ -123,9 +133,9 @@
       if (key.includes("extra_parameters"))
         return "仅在需要平台扩展参数时添加。分别填写名称、值类型和值；开关直接选择，复杂结构使用 JSON。";
       if (key === "models" || key === "custom_models")
-        return "按账号实际权限填写模型 ID；可直接粘贴。下方的按模型覆盖选项会随本列表更新。";
+        return "填写账号可用的模型 ID。";
       if (key.endsWith("unsupported_models"))
-        return "按需添加模型，可选择多个；通过右侧 × 移除。人工限制优先于自动识别，已有未匹配的模型仍会保留。";
+        return "选择需要限制的模型，可添加多个。";
       return "";
     },
   };

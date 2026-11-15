@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 WhiteCloudOL
+# SPDX-License-Identifier: MIT
+
 """客户端结果类型；不依赖绘图插件内部代码或第三方库。"""
 
 from dataclasses import dataclass, field
@@ -13,6 +16,37 @@ class DrawingPreferences(TypedDict, total=False):
     novelai_artist_tags: str
 
 
+class DrawingReferenceOptions(TypedDict, total=False):
+    """单次参考限制；不能打开服务端全局开关。"""
+
+    self_reference: Literal["off", "auto", "required"]
+    user_request: str
+    self_reference_ids: List[str]
+    self_reference_tags: List[str]
+    reference_ids: List[str]
+    multi_reference_confirmed: bool
+    material_sources: List[Literal["chat", "web"]]
+
+
+class SimpleDrawingRequest(TypedDict, total=False):
+    model: str
+    style: str
+    source_image: Union[str, bytes]
+    reference_id: str
+    self_reference: bool
+    stream_id: str
+
+
+class DrawingReferenceSettings(TypedDict, total=False):
+    self_reference_enabled: bool
+    self_names: List[str]
+    self_keywords: List[str]
+    self_reference_ids: List[str]
+    image_edit_presets_enabled: bool
+    default_style: str
+    default_image_edit_preset: str
+
+
 class DrawingRequest(TypedDict, total=False):
     """提交选项；源图既可使用已有 Base64 文本，也可直接传入图片 bytes。"""
 
@@ -22,6 +56,7 @@ class DrawingRequest(TypedDict, total=False):
     task_type: Literal["draw", "edit_image"]
     stream_id: str
     source_images: Optional[Sequence[Union[str, bytes]]]
+    reference_options: DrawingReferenceOptions
     openai_compatibility_mode: str
     novelai_mode: str
     novelai_artist_tags: Optional[str]

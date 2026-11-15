@@ -155,6 +155,53 @@ def test_reference_slots_follow_model_limits(make_plugin, monkeypatch, tmp_path)
     asyncio.run(run())
 
 
+def test_world_images_only_when_request_allows_added_images(make_plugin, monkeypatch, tmp_path):
+    """与原版素材识别互斥：要求文生图或本次开了网络素材搜索时只注入文字；图片计入 8 张上限。"""
+    from types import SimpleNamespace
+    from test_workspace import image_bytes
+    PreparedRequest = module("domain.references").PreparedRequest
+
+    class Preparation:
+        def __init__(self, required_mode, sources, images):
+            self.required_mode = required_mode
+            self.options = SimpleNamespace(material_sources=sources)
+            self.images = images
+            self.expected_mode = required_mode
+
+        async def prepare(self, task_id):
+            mode = "edit_image" if self.images else "draw"
+            return PreparedRequest("画芙宁娜", "", list(self.images), [""] * len(self.images), mode, "", False)
+
+    async def run():
+        plugin = make_plugin(False)
+        await plugin.on_load()
+        try:
+            await add_provider(plugin, "openai", "Primary", models=["primary-image"])
+            service = plugin._require_draw_service()
+            world, _ctx, _store = make_service(tmp_path / "world")
+            service.world_knowledge_service = world
+            calls = capture_attempts(service, monkeypatch)
+            source = image_bytes()
+
+            await draw(plugin, service, "画芙宁娜", reference_preparation=Preparation("", [], []))
+            assert (calls[-1]["task_type"], calls[-1]["sources"]) == ("edit_image", 1)  # 自动模式可加图
+            await draw(plugin, service, "画芙宁娜", reference_preparation=Preparation("draw", [], []))
+            assert (calls[-1]["task_type"], calls[-1]["sources"]) == ("draw", 0)
+            assert "[World references" in calls[-1]["prompt"] and "Image 1" not in calls[-1]["prompt"]
+            await draw(plugin, service, "画芙宁娜", reference_preparation=Preparation("", ["web"], [source]))
+            assert (calls[-1]["task_type"], calls[-1]["sources"]) == ("edit_image", 1)
+            assert "[World references" in calls[-1]["prompt"] and "Image 2" not in calls[-1]["prompt"]
+            await draw(plugin, service, "画芙宁娜", reference_preparation=Preparation("edit_image", ["chat"], [source]))
+            assert (calls[-1]["task_type"], calls[-1]["sources"]) == ("edit_image", 2)
+
+            assert service.world_reference_slots("Primary/primary-image", 7, None) == 1
+            assert service.world_reference_slots("Primary/primary-image", 8, None) == 0
+        finally:
+            await plugin.on_unload()
+
+    asyncio.run(run())
+
+
 def test_world_knowledge_failure_falls_back_to_original_request(make_plugin, monkeypatch, tmp_path):
     async def run():
         plugin = make_plugin(False)
@@ -373,7 +420,7 @@ def test_gif_results_are_not_verified(make_plugin, monkeypatch, tmp_path):
     asyncio.run(run())
 
 
-def test_v2_override_signature_and_validation(make_plugin, monkeypatch, tmp_path):
+def test_api_override_signature_and_validation(make_plugin, monkeypatch, tmp_path):
     from hashlib import sha256
 
     async def run():
@@ -388,24 +435,25 @@ def test_v2_override_signature_and_validation(make_plugin, monkeypatch, tmp_path
             calls = capture_attempts(service, monkeypatch)
             model = "Primary/primary-image"
 
-            forced = await plugin.drawpic_submit_v2("画芙宁娜", model=model, request_id="world-forced-01",
+            forced = await plugin.drawpic_submit("画芙宁娜", model=model, request_id="world-forced-01",
                                                     world_knowledge=True)
             await asyncio.gather(*tuple(service.background_tasks))
             assert forced["accepted"] and "[World references" in calls[-1]["prompt"]
+            assert calls[-1]["task_type"] == "draw" and calls[-1]["sources"] == 0  # 要求文生图时只注入文字
             record = plugin._task_store.get_task(forced["task_id"])
             values = ["画芙宁娜", model, "", "", "draw", "", None, None, {"world_knowledge": True}]
             assert record.submission["signature"] == sha256(json.dumps(values, ensure_ascii=False).encode()).hexdigest()
-            conflict = await plugin.drawpic_submit_v2("画芙宁娜", model=model, request_id="world-forced-01")
+            conflict = await plugin.drawpic_submit("画芙宁娜", model=model, request_id="world-forced-01")
             assert conflict["error"]["code"] == "REQUEST_ID_CONFLICT"
 
-            plain = await plugin.drawpic_submit_v2("画芙宁娜", model=model, request_id="world-plain-001")
+            plain = await plugin.drawpic_submit("画芙宁娜", model=model, request_id="world-plain-001")
             await asyncio.gather(*tuple(service.background_tasks))
             assert calls[-1]["prompt"] == "画芙宁娜"
             plain_values = ["画芙宁娜", model, "", "", "draw", "", None, None]
             assert plugin._task_store.get_task(plain["task_id"]).submission["signature"] == sha256(
                 json.dumps(plain_values, ensure_ascii=False).encode()).hexdigest()
 
-            invalid = await plugin.drawpic_submit_v2("画芙宁娜", model=model, world_knowledge="yes")
+            invalid = await plugin.drawpic_submit("画芙宁娜", model=model, world_knowledge="yes")
             assert invalid["error"]["code"] == "INVALID_REQUEST" and not invalid["accepted"]
 
             receipt = await plugin.workspace_submit(json.dumps(

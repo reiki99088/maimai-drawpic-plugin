@@ -1,7 +1,94 @@
 from __future__ import annotations
 
-from typing import Any
+from copy import deepcopy
+from typing import Any, Dict, List, Optional
 import json
+import re
+
+
+NEGATIVE_PROMPT_OPTION_KEYS = {"negative_prompt", "uc", "v4_negative_prompt"}
+_OPTION_ASSIGNMENT_PATTERN = re.compile(r"\s*[^\s=,，;；\[\]{}\"']+\s*=")
+
+
+def split_inline_key_value_options(value: str) -> List[str]:
+    """兼容旧版内联参数，同时保留 JSON、引号及文本值中的分隔符。"""
+
+    parts: List[str] = []
+    start = 0
+    depth = 0
+    quote = ""
+    escaped = False
+    for index, character in enumerate(value):
+        if quote:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == quote:
+                quote = ""
+            continue
+        if character in "\"'" and (depth > 0 or value[start:index].rstrip().endswith("=")):
+            quote = character
+        elif character in "[{":
+            depth += 1
+        elif character in "]}":
+            depth -= 1
+        elif depth == 0 and (
+            character == "\n"
+            or character in ",，;；" and _OPTION_ASSIGNMENT_PATTERN.match(value, index + 1)
+        ):
+            parts.append(value[start:index].strip())
+            start = index + 1
+    parts.append(value[start:].strip())
+    return [part for part in parts if part]
+
+
+def without_negative_prompt_options(options: Dict[str, Any]) -> Dict[str, Any]:
+    """反向字段由实例处理，禁止扩展参数在发送时覆盖处理结果。"""
+
+    return {key: value for key, value in options.items() if key not in NEGATIVE_PROMPT_OPTION_KEYS}
+
+
+def v4_negative_prompt_option(options: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """校验并复制 NAI 结构化反向词，保留角色顺序、坐标和协议标记。"""
+
+    value = options.get("v4_negative_prompt")
+    if value is None:
+        return None
+    if not isinstance(value, dict) or not isinstance(value.get("caption"), dict):
+        raise ValueError("扩展参数 v4_negative_prompt.caption 必须是对象")
+    caption = value["caption"]
+    if not isinstance(caption.get("base_caption", ""), str):
+        raise ValueError("扩展参数 v4_negative_prompt.caption.base_caption 必须是字符串")
+    characters = caption.get("char_captions", [])
+    if not isinstance(characters, list):
+        raise ValueError("扩展参数 v4_negative_prompt.caption.char_captions 必须是列表")
+    for index, character in enumerate(characters, start=1):
+        if not isinstance(character, dict) or not isinstance(character.get("char_caption", ""), str):
+            raise ValueError(f"扩展参数 v4_negative_prompt 第 {index} 个角色必须是对象且 char_caption 必须是字符串")
+    return deepcopy(value)
+
+
+def negative_prompt_option_parts(
+    options: Dict[str, Any], *, allow_character_captions: bool = False,
+) -> List[str]:
+    """读取旧扩展参数中的反向文本，交给实例统一过滤、去重和改写。"""
+
+    parts: List[str] = []
+    for key in ("negative_prompt", "uc"):
+        value = options.get(key, "")
+        if value is None:
+            continue
+        if not isinstance(value, str):
+            raise ValueError(f"扩展参数 {key} 必须是字符串")
+        parts.append(value)
+    v4_prompt = v4_negative_prompt_option(options)
+    if v4_prompt is not None:
+        caption = v4_prompt["caption"]
+        if caption.get("char_captions") and not allow_character_captions:
+            raise ValueError("扩展参数 v4_negative_prompt 的角色反向词需要使用 NovelAI 平台实例")
+        parts.append(caption.get("base_caption", ""))
+    return parts
 
 
 def parse_key_value_options(items: list[str]) -> dict[str, Any]:
@@ -48,7 +135,7 @@ def parse_option_value(value: str) -> Any:
     if lower_value in {"none", "null"}:
         return None
 
-    if normalized_value.startswith(("{", "[")):
+    if normalized_value.startswith(("{", "[", '"')):
         try:
             return json.loads(normalized_value)
         except json.JSONDecodeError:

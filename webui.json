@@ -140,6 +140,22 @@
             }
           }
         },
+        "references": {
+          "api": "workspace_references",
+          "version": "1",
+          "parameters": {}
+        },
+        "reference_image": {
+          "api": "workspace_reference_image",
+          "version": "1",
+          "parameters": {
+            "asset_id": {
+              "type": "string",
+              "required": true,
+              "max_length": 32
+            }
+          }
+        },
         "knowledge": {
           "api": "workspace_knowledge_list",
           "version": "1",
@@ -261,6 +277,32 @@
             }
           },
           "confirmation": "取消这个绘图任务？已发送到绘图平台的请求可能仍会计费。"
+        },
+        "reference_update": {
+          "api": "workspace_reference_update",
+          "version": "1",
+          "parameters": {
+            "operation": {
+              "type": "string",
+              "required": true,
+              "max_length": 10
+            },
+            "revision": {
+              "type": "integer",
+              "required": true,
+              "minimum": 0
+            },
+            "asset_json": {
+              "type": "string",
+              "required": false,
+              "max_length": 32768
+            },
+            "source_id": {
+              "type": "string",
+              "required": false,
+              "max_length": 32
+            }
+          }
         },
         "knowledge_save": {
           "api": "workspace_knowledge_save",

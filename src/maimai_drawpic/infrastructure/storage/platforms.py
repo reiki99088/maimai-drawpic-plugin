@@ -36,6 +36,7 @@ PLATFORM_NAMES = {
     "volcengine": "火山引擎",
     "siliconflow": "硅基流动",
     "zhipu": "智谱",
+    "minimax": "MiniMax",
     "novelai": "NovelAI / NovelAPI",
     "agnes": "Agnes AI",
     "comfyui": "ComfyUI",
@@ -45,7 +46,7 @@ PLATFORM_DEFAULT_NAMES = {kind: kind for kind in PLATFORM_NAMES}
 PLATFORM_DEFAULT_NAMES["openai"] = "OpenAI_Compatible"
 COMMON_SECTIONS = ("plugin", "general", "style", "proxy")
 HOST_SECTIONS = ("plugin", "proxy", "world_search")
-SECRET_FIELDS = {"api_key", "password"}
+SECRET_FIELDS = {"api_key", "password", "deepseek_api_key"}
 
 
 def common_config(config: Mapping[str, Any]) -> Dict[str, Any]:
@@ -665,4 +666,8 @@ class WorkspaceConfigStore:
 
     @_locked
     def secrets(self) -> List[str]:
-        return [item["config"]["api_key"] for item in self.providers if item["config"].get("api_key")]
+        values = [item["config"]["api_key"] for item in self.providers if item["config"].get("api_key")]
+        key = self.settings.values.get("general", {}).get("references", {}).get("deepseek_api_key", "")
+        if key:
+            values.append(key)
+        return values

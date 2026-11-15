@@ -2,9 +2,11 @@
 
 适合准备账号、模型或本地工作流的管理员。本页按“准备条件 → 必填字段 → 最小配置 → 模型限制 → 高级配置 → 常见错误”列出各平台；日常创作见[使用指南](usage.md)。
 
-目录：[通用规则](#通用规则) · [Agnes](#agnes-ai) · [OpenAI](#openai-与兼容服务) · [Google](#google-gemini) · [智谱](#智谱) · [阿里百炼](#阿里百炼) · [火山引擎](#火山引擎方舟) · [硅基流动](#硅基流动) · [NovelAI](#novelai--novelapi) · [ComfyUI](#comfyui-本地工作流) · [Codex 智能体](#codex-智能体chatgpt)
+目录：[通用规则](#通用规则) · [Agnes](#agnes-ai) · [OpenAI](#openai-与兼容服务) · [Google](#google-gemini) · [智谱](#智谱) · [MiniMax](#minimax) · [阿里百炼](#阿里百炼) · [火山引擎](#火山引擎方舟) · [硅基流动](#硅基流动) · [NovelAI](#novelai--novelapi) · [ComfyUI](#comfyui-本地工作流) · [Codex 智能体](#codex-智能体chatgpt)
 
 ## 通用规则
+
+各平台实例都有“启用反向提示词”，开启后可选填默认反向词。NovelAI 默认开启，其余平台默认关闭。关闭时忽略本次传入与平台默认反向词，保留风格预设自己的正反向内容。开启时，默认词追加到本次反向词后，并与风格反向词去重；开启英文改写的平台会一并改写最终反向词。无独立反向字段的平台会在改写后合并提示词。具体入口见[使用指南](usage.md#绘图与风格)。
 
 工作台已将常用参数转换为下拉、勾选和尺寸输入控件，无需套用 TOML 的填写形式。按模型覆盖项会读取**当前编辑窗口**内的模型列表，包含尚未保存的新模型；兼容网关的特殊参数可以选择自定义值。扩展参数分别选择值类型，JSON 仅用于复杂对象或列表。
 
@@ -25,6 +27,40 @@ OpenAI / 兼容服务、Agnes、Google、阿里百炼、硅基流动和火山引
 百炼使用配置工作空间的 `/api/v1/models` 分页接口，只显示插件已接入的 Qwen Image、Z-Image、可灵与 Vidu 图像模型；硅基流动查询图片模型，Google 读取全部分页。智谱当前保留手动添加，NovelAI 与 ComfyUI 不使用此模型发现入口。
 
 下面的最小示例是**工作台字段填写示意**，不是要粘贴进 `config.toml` 的配置块。点击 **保存平台** 后应看到平台卡片，并能在“开始创作”选择启用模型。除 ComfyUI 外，均需要平台授予的有效 API Key；勿将密钥放入反馈或截图。
+
+## MiniMax
+
+在工作台添加 **MiniMax** 平台，填写按量 API Key。默认地址为 `https://api.minimax.cn/v1`，国际站可按账户填写 `https://api.minimax.io/v1`；不填写具体生成路径。默认只添加 **`MiniMax-H3-Image`**，其他已接入模型可通过 **从官方预设添加** 选择。预设来自官方文档，并标明核对日期；当前 `/v1/models` 返回文本模型，不作为图片模型目录，也不以余额或模型权限错误冒充空列表。
+
+| 模型 | 文生图路径 | 图生图路径与含义 |
+| --- | --- | --- |
+| `MiniMax-H3-Image`、`MiniMax-H3-Image-Highspeed` | `/images/generations` | `/images/edits`，多参考图编辑，按输入顺序传入 `images[].image_url` |
+| `image-01`、`image-01-live` | `/image_generation` | 同一端点的 `subject_reference`，仅单人人物主体参考，不等同于 H3 通用图片编辑 |
+
+主要参数均在平台设置中提供：
+
+| 配置 | 作用与限制 |
+| --- | --- |
+| `size`、`model_size_overrides` | 默认 `auto`；H3 指定宽高时不能同时填写比例或面积。image-01 自定义宽高须同时在 512～2048 内且为 8 的倍数，不适用于 live |
+| `aspect_ratio`、`area` | H3 自动尺寸支持 `auto` 或 X:Y，比例 1:3～3:1；面积档位 1K/2K/4K，留空为服务端 4K。image-01 使用官方固定比例，live 不支持 21:9 |
+| `n` | H3 单次 1～10，image-01 系列 1～9。插件单任务总像素预算仍生效，大批量 4K 请减少张数或选择 1K/2K |
+| `response_format` | URL 或 Base64。H3 发送 `b64_json`，旧协议自动发送 `base64`。URL 有效期 24 小时，仍受插件下载地址校验 |
+| `output_format`、`output_compression` | 仅 H3，JPEG/PNG/WebP；压缩质量 0～100，默认 95，PNG 忽略压缩质量 |
+| `stream` | 仅 H3 且 URL 返回；校验事件类型与图片序号，按输入序号整理结果，缺少终态或断流不重新生成 |
+| `disable_prompt_enhanced` | H3 文生图默认增强；关闭增强后必须指定宽高或固定比例。编辑接口始终增强，不接受关闭 |
+| `prompt_optimizer`、`seed` | 仅 image-01 系列，优化默认关闭；seed 为 -1 时不传，0 是有效种子，不向 H3 发送 seed |
+| `style_type`、`style_weight` | 仅 image-01-live，漫画/元气/中世纪/水彩，权重 (0,1]；与插件风格预设分别生效 |
+| `aigc_watermark` | 控制可见 AIGC 水印，不影响服务端隐式标识 |
+| `request_timeout_seconds` | 实例独立等待时间，默认且至少 600 秒；与其他平台的通用超时分别设置 |
+| `extra_parameters` | 未来扩展字段，不能覆盖模型、提示词、源图，也不能混传两套协议的已知字段 |
+
+H3 原生最多 16 张参考图，工作台和公开 API 沿用插件通用的 **最多 8 张** 输入上限、单任务 40 MiB 输入预算；适配器不会静默丢掉多余图片。H3 源图宽高需在 128～8192，长短边比不超过 4:1；本插件接收 JPEG/PNG/WebP，不声称支持未安装解码器的 HEIC/HEIF。image-01 参考图仅 JPEG/PNG、小于 10 MB。H3 提示词原生上限 32000 字符，工作台/API 沿用通用 16000 字符上限；image-01 为 1500 字符。
+
+MiniMax 无独立反向词字段；实例反向词默认关闭，开启后及风格反向模板的有效内容统一参与改写，再合并到正向提示词。所有实例独立保存密钥、模型和参数，兼容插件访问控制、审核、额度与任务查询。
+
+HTTP 402 或业务码 1008 表示余额不足，1004/2049 表示鉴权问题，1026/1027 为内容审核拒绝；这些错误不会自动重画。只有明确未受理的限流或连接未建立才适用插件安全重试规则；超时、断流、结果解析和下载失败不重新提交生成。单批部分成功只返回成功图片并记录失败条目，不补画失败项。日志保留 HTTP 状态、业务码、请求编号和耗时，不记录密钥、完整 Base64 或带查询参数的图片 URL。
+
+官方参考：[使用指南](https://platform.minimax.cn/docs/guides/image-generation)、[H3 文生图](https://platform.minimax.cn/docs/api-reference/image-generation-h3-generations)、[H3 图像编辑](https://platform.minimax.cn/docs/api-reference/image-generation-h3-edits)、[image-01 接口](https://platform.minimax.cn/docs/api-reference/image-generation-t2i)。
 
 ## Agnes AI
 
@@ -220,6 +256,10 @@ Images API 的生成、编辑能力取决于模型。RinkoAI NAI 目前只支持
 
 可设模型尺寸覆盖、推理步数、提示词引导和额外参数。不同模型采用 `cfg` 或 `guidance_scale` 等不同参数，不能混用。
 
+**启用AI 生成显式水印**（`watermark_enabled`）默认开启，沿用平台默认行为。关闭后，文生图和图生图请求均在 HTTP 请求头发送 `X-Enable-Watermark: 0`；开启时不发送该覆盖头。此参数不能通过请求体中的“额外参数”设置，也不改变平台的隐式水印。各硅基流动实例独立保存，保存平台后应用于新任务。
+
+[官方图片 API 文档](https://docs.siliconflow.cn/docs/api/images-generations-post)要求仅在需要继续处理生成图时显式传 `0`，并由开发者为最终输出补充相应显式标识。此开关不提供图片后处理或标识补绘功能。
+
 ### 常见错误
 
 模型不能编辑：请选择编辑模型。额外字段被拒绝：核对该模型的官方字段，避免使用已退役的输出参数。
@@ -256,6 +296,8 @@ NovelAI 或 NovelAPI 兼容服务账号与可用端点。
 
 可设默认模式、画师、正反向词、模型尺寸、采样器、步数、引导强度、种子、图生图强度。会话模式/画师与平台默认共同作用；全平台风格只套用模板，不切数据集。`{prompt}` 与 `{{tag}}` 含义不同，详见[风格占位符](usage.md#两个占位符是什么)。
 
+V4、V4.5、V5 可在该实例扩展参数的 `v4_negative_prompt.caption.char_captions` 中保留多角色反向词。开启反向词时逐角色去重，并按英文改写设置处理；角色顺序、空占位和坐标均保留。关闭反向词时忽略这些角色内容。配置结构与错误处理见[手动编辑配置](manual-configuration.md#扩展参数的值类型)。
+
 ### 常见错误
 
 尺寸无效：使用模型支持的正整数尺寸。鉴权失败不会通过更换尺寸重试。多张源图会提前拒绝。
@@ -268,7 +310,7 @@ MaiBot 所在机器可访问的 ComfyUI；导出 **API 格式 JSON** 工作流�
 
 ### 必填字段
 
-平台名称、启用 ComfyUI、ComfyUI 地址、工作流路径、实际提示词节点 ID；图生图另填源图节点。ComfyUI 默认停用，需要显式启用此平台实例。
+平台名称、启用 ComfyUI、ComfyUI 地址、工作流路径、实际提示词节点 ID；图生图另填源图节点。工作台按“连接与通用”“文生图工作流”“图生图工作流（可选）”“节点字段与采样”分组，节点 ID 使用单行输入；提示词模式只展示对应的节点设置，切换时保留其他模式的草稿。ComfyUI 默认停用，在工作台新增实例时会启用，也可通过卡片开关停用。
 
 ### 最小配置示例
 
@@ -281,7 +323,7 @@ MaiBot 所在机器可访问的 ComfyUI；导出 **API 格式 JSON** 工作流�
 提示词节点 ID：替换为实际工作流节点
 ```
 
-保存后确认卡片开关显示“已启用”，并在创作页看到“本地插画/comfyui”；没有模型时先检查启用开关，再排查工作流配置。
+保存后确认卡片开关已开启，并在创作页看到“本地插画/comfyui”；没有模型时先检查启用开关，再排查工作流配置。
 
 ### 模型与图生图限制
 
@@ -289,11 +331,26 @@ MaiBot 所在机器可访问的 ComfyUI；导出 **API 格式 JSON** 工作流�
 
 ### 高级配置
 
-标准目录为 `data/plugins/maimai-drawpic-plugin/workflows/`，默认 `t2i.json`、`i2i.json`。`data/` 前缀映射到标准数据目录，旧插件 data 绝对路径也映射；其他相对路径以插件源码目录为基准，允许显式绝对路径，如 `D:/ComfyUI/workflow.json`。`positive_negative` 分别写正反向节点，`single_prompt` 写单一节点；标准文本输入名 `text`、LoadImage 输入名 `image`，种子节点要明确填写。
+工作流默认放在 **MaiBot 主程序根目录下的** `MaiBot\data\plugins\maimai-drawpic-plugin\workflows` 文件夹，目录不存在时自行创建。这里的 `MaiBot` 代表主程序根目录。
+
+| 用途 | 默认文件位置 | 设置中填写 |
+| --- | --- | --- |
+| 文生图 | `MaiBot\data\plugins\maimai-drawpic-plugin\workflows\t2i.json` | `data/workflows/t2i.json` |
+| 图生图 | `MaiBot\data\plugins\maimai-drawpic-plugin\workflows\i2i.json` | `data/workflows/i2i.json` |
+
+配置中的 `data/` 前缀映射到插件标准数据目录 `MaiBot\data\plugins\maimai-drawpic-plugin`。例如，主程序安装在 `D:\Apps\MaiBot` 时，`data/workflows/t2i.json` 对应 `D:\Apps\MaiBot\data\plugins\maimai-drawpic-plugin\workflows\t2i.json`。
+
+其他不以 `data/` 开头的相对路径仍以插件源码目录为基准；旧插件 data 绝对路径继续兼容映射，也支持显式绝对路径，如 `D:/ComfyUI/workflow.json` 或 Linux 下的 `/opt/comfy/workflow.json`。容器部署时使用 MaiBot 容器内可读的路径。
+
+`positive_negative` 分别写正反向节点，两者不能填写同一 ID；`single_prompt` 写单一节点。标准文本输入名 `text`、LoadImage 输入名 `image`；填写实际接收文本、图片文件名或种子的节点，不覆盖 `[节点ID, 输出序号]` 形式的连线。API JSON 的每个节点必须包含 `class_type` 和 `inputs`。
+
+种子为 `-1` 时每次随机，`0` 是有效固定种子，支持至 `18446744073709551615`，WebUI 使用精确十进制输入保存，避免浏览器数字精度损失。种子节点留空时只自动识别唯一的 `seed` 输入；RandomNoise 等节点使用 `noise_seed` 时，请修改种子字段名并填写节点 ID。
+
+本地 API 使用 `POST /prompt` 提交、`GET /history/{prompt_id}` 查询以及 `GET /view` 下载；图生图先通过 `POST /upload/image` 上传到 `input`，保留服务端返回的文件名和子目录。轮询请求与短暂断线查询共同受通用请求超时限制；取得 `prompt_id` 后不再次排队。这里只接入自托管 ComfyUI API，不使用 Comfy Cloud 的 API Key 协议。[官方 API 路由](https://docs.comfy.org/development/comfyui-server/comms_routes) · [官方 API 工作流示例](https://github.com/Comfy-Org/ComfyUI/blob/master/script_examples/basic_api_example.py)
 
 ### 常见错误
 
-找不到节点/字段：检查 API JSON 的节点 ID 和 inputs，不要填画布标题。连不上本地服务：检查所在机器、端口与网络。排队成功后查询断线只查询原 prompt_id，不重复排队。
+找不到节点/字段：检查 API JSON 的节点 ID 和 inputs，不要填画布标题。HTTP 400 会显示服务端的节点 ID、节点类型及校验原因；运行失败保留异常原因与远端任务编号。连不上本地服务：检查所在机器、端口与网络。地址不能带账号、查询参数或片段。排队成功后查询断线只查询原 prompt_id，不重复排队。
 
 ## Codex 智能体（ChatGPT）
 

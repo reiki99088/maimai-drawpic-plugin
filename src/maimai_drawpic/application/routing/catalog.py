@@ -3,7 +3,7 @@ import re
 
 from ...domain.models.openai_profiles import OPENAI_COMPATIBILITY_MODES, normalize_openai_mode
 from ...domain.configuration.models import OpenAICompatibilityMode
-from ...domain.parameters import parse_key_value_options, parse_model_value_overrides
+from ...domain.parameters import parse_key_value_options, parse_model_value_overrides, split_inline_key_value_options
 from .types import OpenAIModelRoute, ProviderName
 
 
@@ -37,7 +37,7 @@ class ModelCatalogMixin:
     def _parse_key_value_text(cls, value: str) -> list[str]:
         """解析对象列表内的 key=value 多行字段为字符串列表。"""
 
-        return cls._split_inline_items(value)
+        return split_inline_key_value_options(value)
 
     @staticmethod
     def _normalize_openai_compatibility_mode(mode: str) -> OpenAICompatibilityMode:
@@ -83,6 +83,7 @@ class ModelCatalogMixin:
                         request_mode=self.config.openai.request_mode,
                         responses_main_model=self.config.openai.responses_main_model,
                         responses_poll_interval_seconds=self.config.openai.responses_poll_interval_seconds,
+                        negative_prompt_config=self.config.openai,
                     )
                 )
 
@@ -122,6 +123,7 @@ class ModelCatalogMixin:
                         request_mode=instance.request_mode,
                         responses_main_model=instance.responses_main_model,
                         responses_poll_interval_seconds=instance.responses_poll_interval_seconds,
+                        negative_prompt_config=instance,
                     )
                 )
         self._openai_routes_cache = routes
@@ -164,6 +166,9 @@ class ModelCatalogMixin:
             return []
         return [model.strip() for model in self.config.zhipu.models if model.strip()]
 
+    def get_minimax_models(self) -> list[str]:
+        return [model.strip() for model in self.config.minimax.models if model.strip()] if self.config.minimax.enabled else []
+
     def get_volcengine_models(self) -> list[str]:
         """获取火山引擎单一模型列表。"""
 
@@ -201,6 +206,7 @@ class ModelCatalogMixin:
             + self.get_openai_models()
             + self.get_google_models()
             + self.get_zhipu_models()
+            + self.get_minimax_models()
             + self.get_volcengine_models()
             + self.get_siliconflow_models()
             + self.get_novelai_models()
@@ -233,6 +239,8 @@ class ModelCatalogMixin:
             return "google"
         if normalized_model in self.get_zhipu_models():
             return "zhipu"
+        if normalized_model in self.get_minimax_models():
+            return "minimax"
         if normalized_model in self.get_volcengine_models():
             return "volcengine"
         if normalized_model in self.get_siliconflow_models():

@@ -3,7 +3,7 @@
 from typing import List, Optional, Tuple
 import aiohttp
 
-from ...domain.errors import ProviderError, ProviderOutcomeUnknown, ProviderResultError, ProviderSubmittedError
+from ...domain.errors import ProviderError, ProviderOutcomeUnknown, ProviderRequestError, ProviderResultError, ProviderSubmittedError
 from .types import ImageRequestAttempt
 from .world import WorldInjection
 from .admission import update_task_owned
@@ -28,6 +28,8 @@ class RequestAttemptRunnerMixin:
         request_negative_prompt: str,
         restricted_models_allowed: bool = False,
         world: Optional[WorldInjection] = None,
+        style_negative_prompt_template: str = "",
+        strict_reference_inputs: bool = False,
     ) -> Tuple[List[bytes], Optional[ImageRequestAttempt], List[str]]:
         # 模式参数只携带调用方/会话的显式覆盖；空值由每个备选实例自行解析默认值。
         # world 存在时首选请求已含世界参考图；备选模型按自身能力重新裁剪接在末尾的世界参考图。
@@ -100,6 +102,7 @@ class RequestAttemptRunnerMixin:
                         source_image_urls=attempt_urls,
                         matched_message_id=matched_message_id,
                         request_negative_prompt=request_negative_prompt,
+                        style_negative_prompt_template=style_negative_prompt_template,
                     )
                     if not images:
                         raise ProviderResultError("已收到图片平台响应，但没有可用图片；未重新提交生成")
@@ -143,7 +146,8 @@ class RequestAttemptRunnerMixin:
                 )
                 if not failure.retryable:
                     break
-            if not failure.allow_fallback:
+            input_rejected = strict_reference_inputs and isinstance(failure, ProviderRequestError) and 400 <= failure.status < 500 and not failure.retryable
+            if not failure.allow_fallback or input_rejected:
                 await update_task_owned(
                     self.task_store,
                     task_id,

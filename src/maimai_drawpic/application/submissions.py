@@ -1,9 +1,13 @@
 """runtime/requests.py 的插件组件。"""
 
+from hashlib import sha256
 from typing import Any, Dict, Optional
+from uuid import uuid4
 import asyncio
+import json
 
 from ..domain.task_errors import ModelAccessError, TaskRequestError
+from .access import require_chat_access, require_integration_api
 from .drawing.admission import wait_for_admission
 from ..domain.models.animation import AnimationOptions
 
@@ -19,6 +23,7 @@ class RequestMixin:
         requested_model: str = "",
         requested_openai_compatibility_mode: str = "",
         request_negative_prompt: str = "",
+        style_negative_prompt_template: Optional[str] = None,
         requested_novelai_mode: str = "",
         requested_novelai_artist_tags: Optional[str] = None,
         animation: Optional[AnimationOptions] = None,
@@ -34,6 +39,11 @@ class RequestMixin:
         restricted_models_allowed: Optional[bool] = None,
         announce_queue: bool = False,
         world_knowledge: Optional[bool] = None,
+        reference_preparation: Any = None,
+        use_reference_features: bool = False,
+        reference_options: Optional[Dict[str, Any]] = None,
+        drawing_style: str = "",
+        reference_task_type: str = "",
     ) -> dict[str, Any]:
         """按当前会话设置启动后台绘图，源图为空时文生图，存在源图时图生图。
 
@@ -43,6 +53,8 @@ class RequestMixin:
 
         draw_service = self._require_draw_service()
         with draw_service.submission_scope():
+            if submission and submission.get("origin") == "plugin":
+                require_integration_api(self.config.general, self.ctx.logger, "submit_chat")
             live_context = await draw_service.stream_service.resolve_live_stream_context(
                 stream_id=stream_id,
                 user_id=user_id,
@@ -61,10 +73,49 @@ class RequestMixin:
             resolved_user_id = runtime_context["user_id"]
             resolved_group_id = runtime_context["group_id"]
             resolved_platform = runtime_context["platform"]
+            require_chat_access(self.config.general, live_context, self.ctx.logger)
             normalized_source_images = source_image_bytes_list or []
             normalized_source_urls = source_image_urls or [""] * len(normalized_source_images)
             if len(normalized_source_urls) != len(normalized_source_images):
                 raise ValueError("源图 URL 数量必须与源图数量一致")
+            # 风格入口已解析的模板（含显式无风格的空串）直接沿用，普通入口只套用一次默认风格。
+            if use_reference_features and reference_preparation is None:
+                from ..domain.references import ReferenceOptions
+                from .references.service import freeze_reference_request
+
+                refs = self.config.general.references
+                values = dict(reference_options or {})
+                values.setdefault("self_reference", "auto" if refs.self_reference_enabled else "off")
+                values.setdefault("material_sources", [name for name, enabled in (
+                    ("chat", refs.allow_chat_material_search), ("web", refs.allow_web_material_search)) if enabled])
+                reference_preparation = await freeze_reference_request(
+                    ctx=self.ctx, config=self.config, store=self._workspace().tasks.references,
+                    streams=draw_service.stream_service, prompt=prompt, style=drawing_style, negative=request_negative_prompt,
+                    stream_id=resolved_stream_id, options=ReferenceOptions.model_validate(values),
+                    images=normalized_source_images, urls=normalized_source_urls,
+                    required_mode=reference_task_type,
+                    get_config=lambda: self.config,
+                )
+                style_negative_prompt_template = ""
+            if reference_preparation is not None:
+                details = {
+                    "reference_options": reference_preparation.options.model_dump(exclude_defaults=True),
+                    "reference_versions": {key: image.version for key, image in reference_preparation.frozen.items()},
+                }
+                if submission is None:
+                    signature = await asyncio.to_thread(lambda: sha256(json.dumps(
+                        {"prompt": prompt, "style": drawing_style, **details}, ensure_ascii=False, sort_keys=True,
+                    ).encode("utf-8")).hexdigest())
+                    submission = {"origin": "chat", "request_id": uuid4().hex, "signature": signature,
+                                  "prompt": prompt, "style": drawing_style}
+                submission = {**submission, **details}
+            if style_negative_prompt_template is None and reference_preparation is None:
+                resolved_style = self._require_style_prompt_resolver().resolve(
+                    style_name="default", user_prompt=prompt, user_negative_prompt=request_negative_prompt,
+                    task_type="edit_image" if normalized_source_images else "draw",
+                )
+                prompt = resolved_style.positive_prompt
+                style_negative_prompt_template = resolved_style.negative_prompt_template
             session_preference = self._get_session_preference(
                 resolved_stream_id,
                 resolved_user_id,
@@ -113,6 +164,10 @@ class RequestMixin:
             ensure_capacity = getattr(draw_service.router, "ensure_agent_capacity", None)
             queue_status = ensure_capacity(resolved_model) if ensure_capacity is not None else None
             task_type = "edit_image" if normalized_source_images else "draw"
+            if reference_preparation is not None:
+                task_type = reference_preparation.expected_mode or task_type
+                if not reference_preparation.expected_mode and not draw_service.router.evaluate_model_task_capability(resolved_model, task_type).allowed:
+                    task_type = "edit_image"
             # 火山引擎使用统一模型列表，按模型名能力标记和全局黑名单提前校验。
             check_model = resolved_model
             if provider_name == "volcengine":
@@ -222,6 +277,9 @@ class RequestMixin:
                     await settle_quota(self._commit_draw_quota, reservation)
 
             try:
+                require_chat_access(self.config.general, live_context, self.ctx.logger)
+                if submission and submission.get("origin") == "plugin":
+                    require_integration_api(self.config.general, self.ctx.logger, "submit_chat")
                 result = await draw_service.start_background_image_request(
                     prompt=prompt,
                     stream_id=resolved_stream_id,
@@ -232,10 +290,12 @@ class RequestMixin:
                     novelai_artist_tags=resolved_novelai_artist_tags,
                     animation=animation,
                     request_negative_prompt=request_negative_prompt.strip(),
+                    style_negative_prompt_template=style_negative_prompt_template,
                     user_id=resolved_user_id,
                     group_id=resolved_group_id,
                     platform_name=resolved_platform,
                     source_image_bytes_list=normalized_source_images,
+                    reference_preparation=reference_preparation,
                     source_image_urls=normalized_source_urls,
                     matched_message_id=matched_message_id,
                     notify_start=notify_start,

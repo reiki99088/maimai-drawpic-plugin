@@ -12,11 +12,16 @@
     terminal:
       '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 9 3 3-3 3m6 0h4"/>',
     refresh: '<path d="M20 8a8 8 0 1 0 1 6M20 3v5h-5"/>',
+    reset: '<path d="M3 10a9 9 0 1 1 2.7 8.3M3 4v6h6"/>',
+    search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/>',
+    info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v1"/>',
+    chevron: '<path d="m6 9 6 6 6-6"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
     arrow: '<path d="M5 12h14m-5-5 5 5-5 5"/>',
     upload: '<path d="M12 16V3m-5 5 5-5 5 5M4 16v4h16v-4"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     check: '<path d="m5 12 4 4L19 6"/>',
+    save: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12l4 4v12a2 2 0 0 1-2 2Z"/><path d="M7 3v6h10V3M7 21v-8h10v8"/>',
     close: '<path d="m6 6 12 12M6 18 18 6"/>',
     download: '<path d="M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4"/>',
     eye: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
@@ -37,12 +42,13 @@
   };
   const views = {};
   const titles = {
-    studio: ["开始创作", "从一个想法开始，剩下的交给画笔。"],
-    tasks: ["绘图任务", "每一次创作，都可以在这里找到。"],
-    platforms: ["绘图平台", "用到哪个，就添加哪个。让每个模型各展所长。"],
-    settings: ["偏好与预设", "把常用的选择，变成顺手的习惯。"],
-    knowledge: ["世界知识", "新角色、新战队、新产品，画之前先查清楚长什么样。"],
-    logs: ["运行日志", "沿着任务链路，找到问题发生的位置。"],
+    studio: "开始创作",
+    tasks: "绘图任务",
+    library: "预设参考",
+    platforms: "绘图平台",
+    settings: "插件设置",
+    knowledge: "世界知识",
+    logs: "运行日志",
   };
   const $ = (selector, root = document) => root.querySelector(selector);
   const e = (value) =>
@@ -160,9 +166,9 @@
   $("#modal-close").onclick = () => closeModal();
   async function bootstrap() {
     state.data = await call("query", "bootstrap");
-    $("#connection").textContent = "已连接当前实例";
+    $("#connection").textContent = "已连接";
     const notice = state.data.config_update_pending
-      ? "配置更新仍在处理中，提交与运行配置刷新尚未确认完成。请稍后刷新查看状态，无需重复提交。"
+      ? "设置仍在生效中，请稍后刷新，无需重复保存。"
       : state.data.runtime_refresh_pending
         ? "运行配置刷新尚未完成。页面刷新只重新查询状态，不会重复保存或自动修复运行配置。"
         : "";
@@ -190,11 +196,10 @@
   }
   async function render() {
     state.renderVersion = (state.renderVersion || 0) + 1;
-    $("#save-settings").hidden = state.view !== "settings";
-    $("#settings-unsaved").hidden = state.view !== "settings" || !state.dirty;
-    const [title, description] = titles[state.view];
-    $("#page-title").textContent = title;
-    $("#page-description").textContent = description;
+    const version = state.renderVersion, content = $("#workspace-content");
+    $("#save-settings").hidden = !["settings", "library"].includes(state.view);
+    $("#settings-unsaved").hidden = !["settings", "library"].includes(state.view) || !state.dirty;
+    $("#page-title").textContent = titles[state.view];
     document.querySelectorAll("[data-view]").forEach((node) => {
       node.classList.toggle("active", node.dataset.view === state.view);
       node.setAttribute(
@@ -203,7 +208,13 @@
       );
     });
     updateNavigationIndicator();
-    await views[state.view]();
+    window.DrawpicUI.motion.loading(content, true);
+    try {
+      await views[state.view]();
+      if (version === state.renderVersion) window.DrawpicUI.motion.enter(content);
+    } finally {
+      if (version === state.renderVersion) window.DrawpicUI.motion.loading(content, false);
+    }
   }
   function updateNavigationIndicator() {
     const nav = $("#navigation"),
@@ -291,7 +302,7 @@
       );
     }
   }
-  function bindSubmit(form) {
+  function bindSubmit(form, { shortcutOnly = false } = {}) {
     // 宿主 sandbox 没有 allow-forms：使用受校验的事件处理，不进行原生表单导航。
     form.querySelectorAll('[type="submit"]').forEach((button) => {
       button.onclick = (event) => {
@@ -300,9 +311,13 @@
       };
     });
     form.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" && event.target.tagName === "INPUT") {
+      if (event.defaultPrevented || event.key !== "Enter" || event.isComposing) return;
+      if (event.ctrlKey || event.metaKey) {
         event.preventDefault();
         submitForm(form);
+      } else if (event.target.tagName === "INPUT") {
+        event.preventDefault();
+        if (!shortcutOnly) submitForm(form);
       }
     });
   }

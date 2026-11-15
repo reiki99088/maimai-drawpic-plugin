@@ -16,6 +16,9 @@ from .types import ImageRequestAttempt
 # 这些平台把多张输入图当作参考图综合使用；NovelAI / ComfyUI 等会把参考图当底图重绘，只注入文字。
 WORLD_REFERENCE_PROVIDERS = frozenset({"openai", "google", "codex", "volcengine"})
 VERIFY_REFERENCE_IMAGES = 2
+# 与原版参考图素材准备共用的合并上限（references/service.py）
+MAX_SOURCE_IMAGES = 8
+MAX_SOURCE_BYTES = 40 * 1024 * 1024
 
 
 @dataclass
@@ -43,7 +46,7 @@ class WorldKnowledgeMixin:
     world_knowledge_service: Optional[WorldKnowledgeService] = None
 
     def world_reference_slots(self, model: str, existing: int, animation: AnimationOptions | None) -> int:
-        """该模型还能附加几张世界参考图；未知或不支持图生图时为 0。"""
+        """该模型还能附加几张世界参考图；未知或不支持图生图时为 0，合并后总数不超过 8 张。"""
         service = self.world_knowledge_service
         if service is None or animation is not None:
             return 0
@@ -55,6 +58,7 @@ class WorldKnowledgeMixin:
         maximum = self.router.get_max_source_images(model)
         if maximum is not None:
             slots = min(slots, maximum - existing)
+        slots = min(slots, MAX_SOURCE_IMAGES - existing)
         return max(0, slots)
 
     async def prepare_world_knowledge(
@@ -67,11 +71,13 @@ class WorldKnowledgeMixin:
         source_urls: List[str],
         animation: AnimationOptions | None,
         override: Optional[bool],
+        allow_images: bool = True,
     ) -> Optional[WorldInjection]:
+        """allow_images=False 时只注入外观文字：调用方要求文生图，或本次已开原版网络素材搜索（两套不叠加加图）。"""
         service = self.world_knowledge_service
         if service is None or not service.enabled(override):
             return None
-        slots = self.world_reference_slots(model, len(source_images), animation)
+        slots = self.world_reference_slots(model, len(source_images), animation) if allow_images else 0
         load = slots
         if service.general.world_knowledge_verify_enabled and animation is None:
             load = max(load, VERIFY_REFERENCE_IMAGES)  # 校验时即使模型不收参考图，也拿参考图对照
@@ -85,7 +91,14 @@ class WorldKnowledgeMixin:
         injection = WorldInjection(prompt, list(source_images), list(source_urls), resolution)
         metadata = resolution.metadata()
         if resolution.entries:
-            injection.kept_images = min(slots, len(resolution.images))
+            kept = min(slots, len(resolution.images))
+            size = sum(len(data) for data in source_images)
+            for index, (_entry_id, data) in enumerate(resolution.images[:kept]):
+                size += len(data)
+                if size > MAX_SOURCE_BYTES:
+                    kept = index
+                    break
+            injection.kept_images = kept
             sent = {entry_id for entry_id, _data in resolution.images[: injection.kept_images]}
             for item in metadata["entries"]:
                 item["image_used"] = item["id"] in sent
@@ -104,6 +117,7 @@ class WorldKnowledgeMixin:
         attempt: ImageRequestAttempt,
         matched_message_id: str,
         request_negative_prompt: str,
+        style_negative_prompt_template: str = "",
     ) -> List[bytes]:
         """对照本次词条校验成图；严重画错时用同一模型重画一次，留下偏差更小的一张。
 
@@ -126,7 +140,7 @@ class WorldKnowledgeMixin:
         result = images
         if first.level == "SEVERE" and service.general.world_knowledge_redraw_enabled:
             keep = world.kept_images
-            if attempt.is_fallback:
+            if attempt.is_fallback and keep:
                 keep = min(
                     self.world_reference_slots(attempt.model, len(world.user_images), None),
                     len(world.resolution.images),
@@ -147,6 +161,7 @@ class WorldKnowledgeMixin:
                     source_image_urls=urls,
                     matched_message_id=matched_message_id,
                     request_negative_prompt=request_negative_prompt,
+                    style_negative_prompt_template=style_negative_prompt_template,
                 )
             except asyncio.CancelledError:
                 raise

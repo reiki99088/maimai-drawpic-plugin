@@ -223,33 +223,33 @@ async def gif_plugin(make_plugin, monkeypatch, models, fallback_models=()):
     return plugin, service, provider["name"], attempts
 
 
-def test_v2_animated_submit_end_to_end_and_signature_compatibility(make_plugin, monkeypatch) -> None:
+def test_api_animated_submit_end_to_end_and_signature_compatibility(make_plugin, monkeypatch) -> None:
     async def run() -> None:
         plugin, service, name, attempts = await gif_plugin(make_plugin, monkeypatch, ["gpt-image-2.6-flare", "gpt-image-2"])
         try:
-            refused = await plugin.drawpic_submit_v2(
+            refused = await plugin.drawpic_submit(
                 prompt="cat", model=f"{name}/gpt-image-2", animated=True, request_id="gif-refused-01",
             )
             assert refused["accepted"] is False and "GIF" in refused["error"]["message"]
-            invalid = await plugin.drawpic_submit_v2(prompt="cat", frame_count=4, request_id="gif-invalid-01")
+            invalid = await plugin.drawpic_submit(prompt="cat", frame_count=4, request_id="gif-invalid-01")
             assert invalid["accepted"] is False
             assert attempts == []
 
-            plain = await plugin.drawpic_submit_v2(prompt="cat", request_id="gif-plain-0001")
+            plain = await plugin.drawpic_submit(prompt="cat", request_id="gif-plain-0001")
             await asyncio.gather(*tuple(service.background_tasks))
             assert attempts[-1].animation is None and plain["accepted"]
-            conflict = await plugin.drawpic_submit_v2(prompt="cat", request_id="gif-plain-0001", animated=True)
+            conflict = await plugin.drawpic_submit(prompt="cat", request_id="gif-plain-0001", animated=True)
             assert conflict["error"]["code"] == "REQUEST_ID_CONFLICT"
 
-            animated = await plugin.drawpic_submit_v2(
+            animated = await plugin.drawpic_submit(
                 prompt="cat", animated=True, frame_count=4, frame_duration_ms=100, request_id="gif-anim-0001",
             )
             await asyncio.gather(*tuple(service.background_tasks))
             assert attempts[-1].animation == AnimationOptions(4, 100)
-            task = await plugin.drawpic_task_v2(animated["task_id"])
+            task = await plugin.drawpic_task(animated["task_id"])
             assert task["status"] == "completed"
             assert task["images"][0]["format"] == "gif" and task["images"][0]["mime"] == "image/gif"
-            reused = await plugin.drawpic_submit_v2(
+            reused = await plugin.drawpic_submit(
                 prompt="cat", animated=True, frame_count=4, frame_duration_ms=100, request_id="gif-anim-0001",
             )
             assert reused["reused"] is True
@@ -273,9 +273,9 @@ def test_fallback_without_gif_support_is_skipped(make_plugin, monkeypatch) -> No
                 raise RuntimeError("primary failed")
 
             monkeypatch.setattr(service, "_run_image_request_attempt", fail)
-            submitted = await plugin.drawpic_submit_v2(prompt="cat", animated=True, request_id="gif-fallback-01")
+            submitted = await plugin.drawpic_submit(prompt="cat", animated=True, request_id="gif-fallback-01")
             await asyncio.gather(*tuple(service.background_tasks))
-            task = await plugin.drawpic_task_v2(submitted["task_id"])
+            task = await plugin.drawpic_task(submitted["task_id"])
             assert task["status"] == "failed"
             assert [attempt.model.rsplit("/", 1)[-1] for attempt in attempts] == ["gpt-image-2.6-flare"]
         finally:
@@ -363,7 +363,7 @@ def test_unspecified_model_switches_to_gif_capable_model(make_plugin, monkeypatc
             await asyncio.gather(*tuple(service.background_tasks))
             assert attempts[-1].model == f"{name}/gpt-image-2.6-flare"
 
-            submitted = await plugin.drawpic_submit_v2(prompt="cat", animated=True, request_id="gif-switch-001")
+            submitted = await plugin.drawpic_submit(prompt="cat", animated=True, request_id="gif-switch-001")
             await asyncio.gather(*tuple(service.background_tasks))
             assert submitted["accepted"] and attempts[-1].model == f"{name}/gpt-image-2.6-flare"
 
@@ -374,7 +374,7 @@ def test_unspecified_model_switches_to_gif_capable_model(make_plugin, monkeypatc
 
             explicit = await plugin.handle_draw(prompt="cat", model=f"{name}/gpt-image-2", animated=True, **context)
             assert not explicit["success"] and f"{name}/gpt-image-2 " in explicit["message"]
-            refused = await plugin.drawpic_submit_v2(
+            refused = await plugin.drawpic_submit(
                 prompt="cat", model=f"{name}/gpt-image-2", animated=True, request_id="gif-explicit-01",
             )
             assert refused["accepted"] is False and f"{name}/gpt-image-2 " in refused["error"]["message"]

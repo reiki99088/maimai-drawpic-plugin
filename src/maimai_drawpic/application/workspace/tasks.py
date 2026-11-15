@@ -13,10 +13,14 @@ from ...infrastructure.media.images import validate_image_bytes
 from ...interfaces.chat.message_images import decode_image_base64
 from ...infrastructure.storage.results import ImageResultStore
 from ...infrastructure.storage.atomic import write_json_atomically
+from ...domain.references import ReferenceOptions
 from ...domain.styles import StylePromptResolver
+from ..references.service import freeze_reference_request
+from ...infrastructure.storage.reference_assets import ReferenceAssetStore
 from ...infrastructure.storage.tasks import DrawTaskStore
 from ...domain.task_errors import ModelAccessError, TaskRequestError, task_error
 from ..drawing.admission import update_task_owned
+from ..access import access_restricted, require_chat_access, require_integration_api
 from .preferences import validate_preferences
 from ...domain.models.animation import parse_animation_options
 
@@ -48,8 +52,10 @@ class WorkspaceTaskService:
         self.lock = asyncio.Lock()
         self.metadata_path = data_dir / "workspace_tasks.json"
         self.metadata: Dict[str, Dict[str, Any]] = {}
+        self.references = ReferenceAssetStore(data_dir)
 
     def initialize(self) -> None:
+        self.references.snapshot()
         if self.metadata_path.exists():
             self.metadata = json.loads(self.metadata_path.read_text(encoding="utf-8"))
             if not isinstance(self.metadata, dict):
@@ -122,7 +128,7 @@ class WorkspaceTaskService:
             await asyncio.to_thread(validate_image_bytes, raw)
         if sum(map(len, images)) > 40 * 1024 * 1024:
             raise ValueError("源图片总大小不能超过 40 MiB")
-        return images
+        return await asyncio.to_thread(lambda: list({sha256(raw).digest(): raw for raw in images}.values()))
 
     async def submit(
         self,
@@ -145,7 +151,11 @@ class WorkspaceTaskService:
         frame_count: int | None = None,
         frame_duration_ms: int | None = None,
         world_knowledge: bool | None = None,
+        reference_options_json: str = "",
+        simple_signature: str = "",
     ) -> Dict[str, Any]:
+        if origin == "plugin":
+            require_integration_api(self.get_config().general, self.ctx.logger, "submit")
         if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 16000:
             raise ValueError("提示词应为 1～16000 个字符")
         if not all(
@@ -156,6 +166,10 @@ class WorkspaceTaskService:
             raise ValueError("任务类型只能是 draw 或 edit_image")
         if world_knowledge is not None and type(world_knowledge) is not bool:
             raise ValueError("world_knowledge 只能是 true、false 或省略")
+        if not isinstance(reference_options_json, str) or len(reference_options_json.encode("utf-8")) > 60 * 1024:
+            raise ValueError("参考选项必须是 60 KiB 以内的 JSON 文本")
+        reference_options = ReferenceOptions.model_validate_json(reference_options_json) if reference_options_json.strip() else ReferenceOptions()
+        reference_values = reference_options.model_dump(exclude_defaults=True)
         if len(negative_prompt) > 16000 or len(model) > 200 or len(style) > 80 or len(stream_id) > 200:
             raise ValueError("绘图参数超过长度限制")
         if request_id and not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", request_id):
@@ -169,6 +183,12 @@ class WorkspaceTaskService:
             raise ValueError("源图片参数必须为列表")
         if len(source_ids or []) + len(source_images or []) > 8:
             raise ValueError("最多提供 8 张源图")
+        context = {}
+        if stream_id and access_restricted(self.get_config().general):
+            context = await self.get_service().stream_service.existing_stream_context(stream_id)
+            if not context:
+                raise TaskRequestError("STREAM_UNAVAILABLE", "必须提供当前实例中已存在的真实聊天流 ID")
+            require_chat_access(self.get_config().general, context, self.ctx.logger)
         options = {"openai_compatibility_mode": openai_compatibility_mode, "novelai_mode": novelai_mode}
         if novelai_artist_tags is not None:
             options["novelai_artist_tags"] = novelai_artist_tags
@@ -182,6 +202,10 @@ class WorkspaceTaskService:
             signature_values.append(animation.signature())
         if world_knowledge is not None:
             signature_values.append({"world_knowledge": world_knowledge})
+        if reference_values:
+            signature_values.append({"reference_options": reference_values})
+        if simple_signature:
+            signature_values = ["simple", simple_signature]
         signature = await asyncio.to_thread(
             lambda: sha256(
                 json.dumps(
@@ -191,6 +215,10 @@ class WorkspaceTaskService:
             ).hexdigest()
         )
         async with self.lock:
+            if origin == "plugin":
+                require_integration_api(self.get_config().general, self.ctx.logger, "submit")
+            if context:
+                require_chat_access(self.get_config().general, context, self.ctx.logger)
             retained = await asyncio.to_thread(self.task_store.retained_task_ids)
             self.metadata = {key: value for key, value in self.metadata.items() if key in retained}
             if request_id:
@@ -213,8 +241,6 @@ class WorkspaceTaskService:
             images = await self._sources(source_ids or [], source_images or [])
             if task_type == "draw" and images:
                 raise ValueError("文生图不能附带源图，请选择图生图")
-            if task_type == "edit_image" and not images:
-                raise ValueError("图生图需要真实源图片")
             service = self.get_service()
             router = service.router
             resolved_model = router.resolve_model_name(model, allow_unknown_model=False)
@@ -248,13 +274,32 @@ class WorkspaceTaskService:
                 )
                 if not animation_capability.allowed:
                     raise ValueError(animation_capability.reason)
-            router.validate_source_image_count(resolved_model, len(images))
             await asyncio.to_thread(router.validate_forced_command_task, resolved_model, task_type)
             if images:
                 router.validate_local_source_images(resolved_model)
-            resolved_style = StylePromptResolver(self.get_config().style).resolve(
-                style_name=style, user_prompt=prompt, user_negative_prompt=negative_prompt
+            preparation = await freeze_reference_request(
+                ctx=self.ctx, config=self.get_config(), store=self.references, streams=service.stream_service,
+                prompt=prompt, style=style, negative=negative_prompt, stream_id=stream_id,
+                options=reference_options, images=images, urls=[""] * len(images), required_mode=task_type,
+                get_config=self.get_config,
             )
+            if task_type == "edit_image" and not images and not preparation.self_ids and not reference_options.material_sources and not preparation.frozen:
+                raise TaskRequestError("SOURCE_IMAGE_REQUIRED", "图生图需要真实源图片，请提供图片或选择已开启的参考来源")
+            known = list(images)
+            known.extend(preparation.frozen[key].raw for key in reference_options.reference_ids)
+            if reference_options.self_reference == "required":
+                known.extend(preparation.frozen[key].raw for key in preparation.self_ids)
+            selected_preset = StylePromptResolver(preparation.config.style).select_for_task(
+                style, task_type, reference_options.user_request or prompt,
+            )
+            if selected_preset is not None:
+                known.extend(preparation.frozen[binding.asset_id].raw for binding in selected_preset.reference_bindings)
+            unique_sizes = await asyncio.to_thread(lambda: {sha256(raw).digest(): len(raw) for raw in known})
+            if len(unique_sizes) > 8 or sum(unique_sizes.values()) > 40 * 1024 * 1024:
+                raise TaskRequestError("REFERENCE_LIMIT_EXCEEDED", "合并后的源图最多 8 张、总计 40 MiB")
+            router.validate_source_image_count(resolved_model, len(unique_sizes))
+            if known:
+                router.validate_local_source_images(resolved_model)
             submission = {
                 "origin": origin,
                 "request_id": request_id or uuid4().hex,
@@ -262,17 +307,26 @@ class WorkspaceTaskService:
                 "prompt": prompt,
                 "style": style,
             }
+            submission["reference_options"] = reference_values
+            if simple_signature:
+                submission["simple_signature"] = simple_signature
+            submission["reference_versions"] = {key: image.version for key, image in preparation.frozen.items()}
+            if origin == "plugin":
+                require_integration_api(self.get_config().general, self.ctx.logger, "submit")
+            if context:
+                require_chat_access(self.get_config().general, context, self.ctx.logger)
             if stream_id:
-                context = {}
-                if require_existing_stream:
+                if require_existing_stream and not context:
                     context = await service.stream_service.existing_stream_context(stream_id)
                     if not context:
                         raise TaskRequestError("STREAM_UNAVAILABLE", "必须提供当前实例中已存在的真实聊天流 ID")
+                    require_chat_access(self.get_config().general, context, self.ctx.logger)
                 result = await self.submit_chat(
-                    prompt=resolved_style.positive_prompt,
+                    prompt=prompt,
                     stream_id=stream_id,
                     requested_model=resolved_model,
-                    request_negative_prompt=resolved_style.negative_prompt,
+                    request_negative_prompt=negative_prompt,
+                    style_negative_prompt_template="",
                     requested_openai_compatibility_mode=options["openai_compatibility_mode"],
                     requested_novelai_mode=options["novelai_mode"],
                     requested_novelai_artist_tags=options.get("novelai_artist_tags"),
@@ -285,10 +339,11 @@ class WorkspaceTaskService:
                     submission=submission,
                     **({"restricted_models_allowed": True} if trusted_origin else {}),
                     world_knowledge=world_knowledge,
+                    reference_preparation=preparation,
                 )
             else:
                 result = await service.start_background_image_request(
-                    prompt=resolved_style.positive_prompt,
+                    prompt=prompt,
                     stream_id="",
                     resolved_model=resolved_model,
                     resolved_openai_mode=options["openai_compatibility_mode"],
@@ -296,12 +351,14 @@ class WorkspaceTaskService:
                     novelai_artist_tags=options.get("novelai_artist_tags", ""),
                     animation=animation,
                     provider_name=router.get_model_provider(resolved_model),
-                    request_negative_prompt=resolved_style.negative_prompt,
+                    request_negative_prompt=negative_prompt,
+                    style_negative_prompt_template="",
                     source_image_bytes_list=images,
                     prompt_reviewed=False,
                     submission=submission,
                     restricted_models_allowed=trusted_origin,
                     world_knowledge=world_knowledge,
+                    reference_preparation=preparation,
                 )
             task_id = result["task_id"]
             self.metadata[task_id] = submission

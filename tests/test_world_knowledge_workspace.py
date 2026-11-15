@@ -13,9 +13,11 @@ def call(coro):
     return asyncio.run(coro)
 
 
-async def loaded(make_plugin):
+async def loaded(make_plugin, online=False):
     plugin = make_plugin()
     await plugin.on_load()
+    if not online:  # SDK 2.23 的上下文总带 web 能力；这里模拟宿主未开联网检索
+        plugin._world_service._online = lambda: False
     return plugin
 
 
@@ -33,7 +35,7 @@ def test_manual_entry_save_lock_unlock_disable_and_delete(make_plugin):
             assert {"look", "aliases", "franchise"} <= set(created["locked_fields"])
             listed = await plugin.workspace_knowledge_list()
             assert listed["total"] == 1 and listed["items"][0]["id"] == created["id"]
-            assert listed["enabled"] is False and listed["online"] is False
+            assert listed["enabled"] is False and listed["online"] is (getattr(plugin.ctx, "web", None) is not None)
             assert {"value": "esports_team", "label": "电竞战队"} in listed["kinds"]
             assert (await plugin.workspace_knowledge_list(search="skt"))["total"] == 1
             assert (await plugin.workspace_knowledge_list(search="原神"))["total"] == 0

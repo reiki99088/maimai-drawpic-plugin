@@ -3,6 +3,7 @@ import asyncio
 import inspect
 
 from ...infrastructure.media.collection import validate_result_images
+from ...domain.styles import StylePromptResolver
 from ...infrastructure.http import sanitize_provider_text
 from ...infrastructure.providers.codex import CodexRunRequest
 from .admission import update_task_owned, wait_for_admission
@@ -186,6 +187,7 @@ class RequestPlanningMixin:
         source_image_urls: list[str],
         matched_message_id: str,
         request_negative_prompt: str = "",
+        style_negative_prompt_template: str = "",
     ) -> list[bytes]:
         """执行单次图片请求尝试。"""
 
@@ -193,32 +195,61 @@ class RequestPlanningMixin:
         if task_type == "edit_image":
             self.router.validate_source_image_count(attempt.model, len(source_image_bytes_list))
         provider_prompt = prompt
-        provider_negative_prompt = request_negative_prompt.strip()
+        negative_config = self.router.get_negative_prompt_config(attempt.model)
+        provider_negative_prompt = StylePromptResolver.render_negative_prompt(
+            style_negative_prompt_template,
+            self.router.resolve_negative_prompt(attempt.model, request_negative_prompt, task_type),
+        )
+        v4_negative_prompt = (
+            self.router.resolve_v4_negative_prompt(attempt.model) if provider_name == "novelai" else None
+        )
+        characters = [] if v4_negative_prompt is None else v4_negative_prompt["caption"].get("char_captions", [])
         supports_negative_prompt = self.router.supports_separate_negative_prompt(
             attempt.model,
             task_type,
         )
-        if provider_negative_prompt and not supports_negative_prompt:
-            provider_prompt = self.router.merge_prompt_parts(
-                provider_prompt,
-                f"Negative prompt: {provider_negative_prompt}",
-            )
-            provider_negative_prompt = ""
+        self.ctx.logger.info(
+            "反向提示词处理: task_id=%s task_type=%s provider=%s model=%s enabled=%s "
+            "request_ignored=%s style_present=%s negative_len=%s character_count=%s transport=%s",
+            task_id, task_type, provider_name, attempt.model, negative_config.negative_prompt_enabled,
+            bool(request_negative_prompt.strip()) and not negative_config.negative_prompt_enabled,
+            bool(style_negative_prompt_template.strip(" \t\r\n,").replace("{negative_prompt}", "")),
+            len(provider_negative_prompt),
+            len(characters),
+            "none" if not provider_negative_prompt and not characters else "separate" if supports_negative_prompt else "merged",
+        )
         provider_prompt = await self.rewrite_prompt_to_english_if_needed(
             provider_prompt,
             provider_name,
             attempt.model,
         )
-        if provider_negative_prompt:
-            provider_negative_prompt = await self.rewrite_prompt_to_english_if_needed(
-                provider_negative_prompt,
-                provider_name,
-                attempt.model,
+        provider_negative_prompt = await self._rewrite_negative_prompt(
+            provider_negative_prompt, provider_name, attempt.model, task_id=task_id,
+        )
+        for index, character in enumerate(characters, start=1):
+            # 角色列表的位置与坐标共同表达归属，不能过滤空项或在角色之间合并词条。
+            if "char_caption" in character:
+                character["char_caption"] = await self._rewrite_negative_prompt(
+                    character["char_caption"], provider_name, attempt.model, task_id=task_id, role_index=index,
+                )
+        if v4_negative_prompt is not None:
+            v4_negative_prompt["caption"]["base_caption"] = provider_negative_prompt
+            self.ctx.logger.info(
+                "NAI 角色反向词处理完成: task_id=%s model=%s character_count=%s nonempty_count=%s",
+                task_id, attempt.model, len(characters),
+                sum(bool(character.get("char_caption", "")) for character in characters),
             )
+        if provider_negative_prompt and not supports_negative_prompt:
+            provider_prompt = self.router.merge_prompt_parts(
+                provider_prompt, f"Negative prompt: {provider_negative_prompt}",
+            )
+            provider_negative_prompt = ""
         image_platform, provider_name = self.router.require_platform_for_model(
             attempt.model,
             attempt.openai_compatibility_mode,
             request_negative_prompt=provider_negative_prompt,
+            prepared_negative_prompt=provider_negative_prompt,
+            prepared_v4_negative_prompt=v4_negative_prompt,
             novelai_mode=attempt.novelai_mode,
             novelai_artist_tags=attempt.novelai_artist_tags,
             **({"animation": attempt.animation} if attempt.animation is not None else {}),
@@ -236,7 +267,7 @@ class RequestPlanningMixin:
 
         if task_type == "edit_image":
             self.ctx.logger.info(
-                "开始绘图任务尝试: task_id=%s task_type=%s provider=%s model=%s is_fallback=%s animation=%s source_image_count=%s source_image_bytes_lengths=%s matched_message_id=%s prompt=%s",
+                "开始绘图任务尝试: task_id=%s task_type=%s provider=%s model=%s is_fallback=%s animation=%s source_image_count=%s source_image_bytes_lengths=%s matched_message_id=%s prompt_len=%s",
                 task_id,
                 task_type,
                 provider_name,
@@ -246,7 +277,7 @@ class RequestPlanningMixin:
                 len(source_image_bytes_list),
                 [len(image_bytes) for image_bytes in source_image_bytes_list],
                 matched_message_id,
-                provider_prompt[:120],
+                len(provider_prompt),
             )
             if provider_name == "aliyun":
                 return await self.run_provider_call(
@@ -266,14 +297,14 @@ class RequestPlanningMixin:
             )
 
         self.ctx.logger.info(
-            "开始绘图任务尝试: task_id=%s task_type=%s provider=%s model=%s is_fallback=%s animation=%s source_image_count=0 prompt=%s",
+            "开始绘图任务尝试: task_id=%s task_type=%s provider=%s model=%s is_fallback=%s animation=%s source_image_count=0 prompt_len=%s",
             task_id,
             task_type,
             provider_name,
             attempt.model,
             attempt.is_fallback,
             attempt.animation.describe() if attempt.animation is not None else "none",
-            provider_prompt[:120],
+            len(provider_prompt),
         )
         return await self.run_provider_call(
             image_platform.generate_images,

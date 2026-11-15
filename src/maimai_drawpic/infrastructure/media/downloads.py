@@ -149,6 +149,7 @@ async def _download_image(
     skip_ip_check: bool,
     extra_allowed_networks: tuple = (),
     headers: Optional[Mapping[str, str]] = None,
+    image_content: bool = True,
 ) -> bytes:
     """逐跳选择实际代理；直连默认只访问公网或管理员配置的同源服务。"""
     try:
@@ -160,10 +161,12 @@ async def _download_image(
                 timeout_seconds=timeout_seconds,
                 skip_ip_check=skip_ip_check,
                 extra_allowed_networks=extra_allowed_networks,
-                max_bytes=current_budget().available,
+                # 素材网页只读有限正文，不计入图片配额、不按图片校验。
+                max_bytes=current_budget().available if image_content else (lambda: 512 * 1024),
                 headers=headers,
             )
-            await asyncio.to_thread(validate_image_bytes, raw)
+            if image_content:
+                await asyncio.to_thread(validate_image_bytes, raw)
             return raw
     except ProviderResultError:
         raise

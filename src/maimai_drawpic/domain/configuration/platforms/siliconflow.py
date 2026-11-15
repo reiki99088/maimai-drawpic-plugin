@@ -1,9 +1,11 @@
 """configuration/platforms/siliconflow.py 的强类型配置定义。"""
 
-from maibot_sdk import Field, PluginConfigBase
+from maibot_sdk import Field
+
+from .common import NegativePromptConfig
 
 
-class SiliconFlowModelConfig(PluginConfigBase):
+class SiliconFlowModelConfig(NegativePromptConfig):
     """硅基流动模型配置。"""
 
     __ui_label__ = "硅基流动配置"
@@ -14,7 +16,7 @@ class SiliconFlowModelConfig(PluginConfigBase):
         description="是否启用硅基流动平台",
         json_schema_extra={
             "label": "启用硅基流动平台",
-            "hint": "关闭后，本节模型不会出现在可用模型列表，也不会参与路由",
+            "hint": "关闭后，该平台的模型将不可选。",
             "order": -1,
         },
     )
@@ -96,13 +98,12 @@ class SiliconFlowModelConfig(PluginConfigBase):
             "order": 7.5,
         },
     )
-    negative_prompt: str = Field(
-        default="",
-        description="硅基流动反向提示词",
+    watermark_enabled: bool = Field(
+        default=True,
+        description="是否启用硅基流动生成图片的显式 AI 生成水印。",
         json_schema_extra={
-            "label": "反向提示词",
-            "hint": "留空则不传 negative_prompt",
-            "input_type": "textarea",
+            "label": "启用AI 生成显式水印",
+            "hint": "默认开启，关闭后仍保留隐式水印。",
             "order": 8,
         },
     )

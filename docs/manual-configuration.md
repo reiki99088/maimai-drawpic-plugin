@@ -14,6 +14,7 @@
 | --- | --- |
 | `data/plugins/maimai-drawpic-plugin/platforms.json` | 所有命名平台实例、连接信息、密钥与模型参数 |
 | `data/plugins/maimai-drawpic-plugin/workspace_settings.json` | 通用参数、管理员、额度规则、审核与风格模板 |
+| `data/plugins/maimai-drawpic-plugin/reference_assets/` | 持久参考图库索引和图片；由工作台管理，不属于临时图片缓存 |
 | 插件目录内的 `config.toml` | 插件开关、代理、图片/日志/上传缓存容量、世界知识搜图服务密钥 |
 
 插件文件夹改名不会改变上面以插件 ID 命名的数据目录。先正常加载插件一次，让它创建配置；编辑已有文件比从零手写完整结构更方便。
@@ -52,6 +53,8 @@
         "models": ["gpt-image-2.5", "gpt-image-1"],
         "default_openai_compatibility_mode": "auto",
         "default_size": "1024x1024",
+        "negative_prompt_enabled": false,
+        "negative_prompt": "",
         "model_size_overrides": ["gpt-image-1=1024x1536"],
         "quality": "",
         "output_format": "",
@@ -67,9 +70,13 @@
 
 - `providers` 是平台实例列表；同一种 `kind` 可以出现多次，但名称须不区分大小写唯一，支持中英文且不能含空格。最多 40 个实例。
 - `id` 是 32 位小写十六进制字符串。已有实例不要改；新建实例优先通过工作台生成 ID，再在文件中编辑。
-- `kind` 支持 `openai`、`agnes`、`google`、`zhipu`、`aliyun`、`volcengine`、`siliconflow`、`novelai`、`comfyui`、`codex`。
+- `kind` 支持 `openai`、`agnes`、`google`、`zhipu`、`minimax`、`aliyun`、`volcengine`、`siliconflow`、`novelai`、`comfyui`、`codex`。
 - `codex` 实例没有 API Key，常用字段示例：`{"enabled": true, "access_scope": "admin", "models": ["gpt-6.1-sol"], "reasoning_effort": "medium", "codex_path": "", "codex_home": "", "task_timeout_seconds": 900, "max_concurrent_tasks": 1, "max_queued_tasks": 3, "queue_timeout_seconds": 1200, "max_reference_downloads": 8, "allow_proxy_fake_ip": true, "resume_enabled": true, "thread_retention_days": 7, "deliver_all_images": false}`。`access_scope` 只能是 `admin` 或 `all`；会话索引与参考图保存在标准数据目录的 `codex_agent/` 下，不要手动编辑其中的 `threads.json`。
 - `config` 是该平台类型的字段，不能把另一种平台的参数混入。省略的已知字段会使用该平台默认值；已有文件通常已写出完整字段。
+- 每个实例的 `negative_prompt_enabled` 控制本次输入与默认反向词；开启后，`negative_prompt` 作为默认词追加并去重。NovelAI 默认开启，其余平台默认关闭。关闭时忽略调用方与默认反向词，风格预设自己的模板仍保留。启用 `rewrite_prompt_to_english` 的平台会在合并默认词和风格后改写最终反向词。
+- ComfyUI 旧 `t2i_negative_prompt`、`i2i_negative_prompt` 继续按任务类型追加，与新的通用 `negative_prompt` 一起受实例开关控制。
+
+ComfyUI 工作流文件默认放在 `MaiBot\data\plugins\maimai-drawpic-plugin\workflows`（`MaiBot` 为主程序根目录）。将文生图文件命名为 `t2i.json` 后，`t2i_workflow_path` 填写 `data/workflows/t2i.json`；图生图文件 `i2i.json` 对应 `i2i_workflow_path` 的 `data/workflows/i2i.json`。路径与文件位置对照见 [ComfyUI 平台说明](platforms.md#comfyui-本地工作流)。
 - 模型列表仅填写真实模型 ID，不再使用 `别名=模型ID`；分辨率覆盖也使用真实模型 ID。
 - OpenAI 的 `request_mode` 只能是 `images` 或 `responses_background`，其他值按 `images` 读取；`responses_poll_interval_seconds` 超出 1～30 时自动限制到范围内。说明见[平台配置说明](platforms.md#高级配置)。
 - NovelAI 同样只维护一个 `models` 列表，可混合官方预设与兼容服务自定义 ID；旧 `custom_models` 加载时合并去重，保存后移除此旧字段。
@@ -94,6 +101,12 @@
 
 ### 扩展参数的值类型
 
+扩展参数中的 `negative_prompt`、`uc` 和 `v4_negative_prompt.caption.base_caption` 会作为旧版默认反向文本并入实例处理，受反向词开关、去重和英文改写控制，不再直接覆盖最终请求。实例关闭反向词时忽略这些内容。
+
+NAI 兼容网关的旧版 UC 预设同样受实例反向词开关控制：关闭时不发送 `ucPreset`，包括扩展参数中的同名字段；开启时保留配置的 `uc_preset`，扩展参数中的 `ucPreset` 可覆盖该编号。官方 V3/V4/V5 模型不发送这个旧版字段。
+
+NovelAI 实例支持 `v4_negative_prompt.caption.char_captions` 多角色反向词。开启实例反向词后，每个角色的 `char_caption` 分别去重，并按实例的英文改写设置处理；空角色占位、列表顺序、`centers` 坐标以及 `use_coords`、`use_order` 等标记会保留。全图默认词与风格词在 `base_caption` 中处理；不同角色之间分别保留词条。关闭实例反向词后忽略整个扩展反向结构，风格模板自己的全图反向内容继续生效。角色格式错误或改写失败时会报出角色序号，并在发送生成请求前终止任务。[NovelAI 字段结构](https://image.novelai.net/docs/index.html)
+
 `extra_parameters` 以及百炼各模型族的 `*_extra_parameters` 只用于服务实际支持的扩展字段。以下仅展示类型写法，参数名为示意：
 
 ```json
@@ -111,6 +124,46 @@
 
 文件里的 `api_key` 是真实值：手动改成空字符串就会清空密钥。它不同于 WebUI 密钥框“留空保留”的交互规则。
 
+### 硅基流动显式水印
+
+硅基流动实例的 `config` 可填写以下**字段片段**，关闭 API 生成图上的显式「AI 生成」水印：
+
+```json
+{
+  "watermark_enabled": false
+}
+```
+
+默认是 `true`，已有配置未填写该字段时保持平台的默认水印行为。设置为 `false` 后，文生图和图生图均发送 HTTP 请求头 `X-Enable-Watermark: 0`；不是请求体参数，不能用 `extra_parameters` 代替。隐式水印仍保留；适用场景及最终输出标识要求见[硅基流动平台说明](platforms.md#硅基流动)。
+
+### MiniMax 实例示例
+
+在 `platforms.json` 的 `providers` 中添加平台时沿用已有记录的 ID 格式，实际操作推荐先通过工作台创建再编辑。以下仅展示 `config` 字段，密钥请自行填写，不使用任何共享测试密钥：
+
+```json
+{
+  "enabled": true,
+  "api_key": "填写自己的 MiniMax API Key",
+  "base_url": "https://api.minimax.cn/v1",
+  "models": ["MiniMax-H3-Image"],
+  "size": "auto",
+  "aspect_ratio": "",
+  "area": "1K",
+  "n": 1,
+  "response_format": "url",
+  "output_format": "jpeg",
+  "output_compression": 95,
+  "stream": false,
+  "disable_prompt_enhanced": false,
+  "aigc_watermark": false,
+  "request_timeout_seconds": 600,
+  "negative_prompt_enabled": false,
+  "extra_parameters": []
+}
+```
+
+此示例显式选择 1K；平台默认 `area` 为空，使用服务端默认 4K。H3、image-01 与 image-01-live 的字段差异、流式限制和其他参数见 [MiniMax 平台说明](platforms.md#minimax)。图片模型使用官方文档预设，不能通过仅返回文本模型的 `/v1/models` 获取。
+
 ## 通用与风格示例
 
 `workspace_settings.json` 顶层同时包含 `general` 和 `style`。以下是一份最小结构示例，未列出的通用字段沿用默认值：
@@ -121,11 +174,17 @@
   "revision": 1,
   "settings": {
     "general": {
+      "integration_api_enabled": true,
+      "group_access_mode": "blacklist",
+      "group_access_ids": [],
+      "private_access_mode": "blacklist",
+      "private_access_ids": [],
       "default_model": "",
       "fallback_models": [],
       "request_retry_count": 1,
       "request_timeout_seconds": 150,
       "skip_image_url_ip_check": false,
+      "sync_generated_images_to_history": false,
       "admin_user_ids": [],
       "prompt_review_enabled": false,
       "prompt_review_model": "vlm",
@@ -136,15 +195,35 @@
       "image_review_timeout_seconds": 60,
       "image_review_retry_count": 2,
       "world_knowledge_enabled": false,
-      "world_knowledge_verify_enabled": false
+      "world_knowledge_verify_enabled": false,
+      "references": {
+        "self_reference_enabled": false,
+        "self_names": ["麦麦"],
+        "self_keywords": ["自拍", "画", "绘图"],
+        "self_reference_ids": [],
+        "multi_reference_confirmed": false,
+        "material_model": "vlm",
+        "allow_chat_material_search": false,
+        "chat_material_search_limit": 50,
+        "allow_web_material_search": false,
+        "web_search_provider": "maibot",
+        "deepseek_api_key": ""
+      }
     },
     "style": {
       "default_style": "水彩",
+      "image_edit_presets_enabled": false,
+      "default_image_edit_preset": "",
       "presets": [
         {
           "name": "水彩",
           "enabled": true,
           "description": "柔和的透明水彩质感",
+          "preset_type": "text_to_image",
+          "tags": ["水彩"],
+          "apply_to_image_edit": false,
+          "reference_bindings": [],
+          "multi_reference_confirmed": false,
           "positive_prompt_template": "水彩，{prompt}",
           "negative_prompt_template": "水印，{negative_prompt}"
         }
@@ -156,9 +235,15 @@
 
 常用字段：
 
+- `integration_api_enabled`：默认 `true`，关闭后拒绝所有公开插件联动 API，工作台和聊天入口仍可使用；已受理任务继续执行。
+- `group_access_mode`、`private_access_mode`：分别填 `blacklist`（默认）或 `whitelist`。空黑名单允许全部，空白名单禁止对应的群聊或私聊。
+- `group_access_ids`、`private_access_ids`：分别填写群号和 QQ 号的字符串列表，如 `["123456789"]`；QQ 官方适配器填写对应群/用户 OpenID。无需会话哈希，私聊名单不影响群内成员。[完整规则](configuration.md#插件联动与黑白名单)。
+
+- `sync_generated_images_to_history`：默认 `false`。开启后，成功投递到聊天的生成图通过 Host 同步到当前 MaiSaka 历史，视觉 Planner 可查看图片，文本 Planner 使用图片描述；可能增加视觉上下文与后台识图开销。未投递任务和命令回复卡片不请求同步，回执未知不重发。详见[同步范围与日志](configuration.md#生成图片与会话历史)。
+
 - `default_model`：空字符串表示自动选择；指定时填写完整“平台名/模型名”。
 - `fallback_models`：有顺序的模型名称列表，空列表表示不启用备选。
-- `request_retry_count`：每模型额外重试次数，默认 1，可选 0～5；不是遇到任何失败都重新绘图。审核配置在界面中独立成标签页，文件中的字段仍在 `general` 下。
+- `request_retry_count`：每模型额外重试次数，默认 1，可选 0～5；不是遇到任何失败都重新绘图。内容审核位于插件设置的独立分类，文件中的字段仍在 `general` 下。
 - `request_timeout_seconds`：单次平台尝试的超时预算，不是任务整体的永久等待时间。
 - `skip_image_url_ip_check`：默认 `false`。仅在可信内网图床或 TUN/Fake-IP 等特殊 DNS 环境需要时设为 `true`；手动/系统代理会自动保留域名交由代理解析，详见[图片下载说明](configuration.md#请求与安全边界)。
 - `prompt_review_model`、`image_review_model`：分别选择提示词和图片审核使用的宿主任务组，均默认 `vlm`，还可填 `replyer` 或 `planner`；图片审核必须使用支持图片输入的模型。
@@ -171,7 +256,52 @@
 - `world_knowledge_verify_enabled`：画后校验，默认 `false`；`world_knowledge_verify_model` 默认 `vlm`，必须支持图片输入。`world_knowledge_redraw_enabled` 默认 `true`，校验判为严重画错时重画一次，任务耗时约翻倍，不额外扣次数。
 - `admin_user_ids`：字符串列表，例如 `["12345678"]`；不同适配器的用户 ID 形式可能不同。
 - `image_edit_unsupported_models`、`text_to_image_unsupported_models`：人工限制的模型列表；优先使用工作台中的完整模型名称。
-- `presets`：风格模板列表。默认风格名称应对应一个已启用风格；保留 `{prompt}`、`{negative_prompt}` 来代入本次描述和反向词。
+- `presets`：绘图预设列表；保留 `{prompt}`、`{negative_prompt}` 来代入本次描述和反向词。旧预设缺少新字段时按文生图预设读取。
+- `default_style`：默认文生图预设名称；应对应已启用的 `text_to_image` 预设。空字符串表示不设置默认项。
+- `image_edit_presets_enabled`：图生图预设总开关，默认 `false`。关闭时新入口的图生图不使用任何预设；不影响图生图本身和自我参考。
+- `default_image_edit_preset`：默认图生图预设名称；留空时，只有默认文生图预设已勾选 `apply_to_image_edit` 才可继承。
+- `preset_type`：`text_to_image` 只能保存文字模板；`image_to_image` 可以绑定真实参考图片，不再使用 `apply_to_image_edit`。
+- `apply_to_image_edit`：文生图预设是否也适用于图生图，默认 `false`；同时受图生图总开关控制。
+- `tags`：用于固定匹配的 tag 列表。显式选择优先，其次 tag，最后当前模式的默认项；同次只使用一个预设。
+
+### 参考与素材字段
+
+`general.references` 是“预设参考 → 自我参考 / 素材来源”的持久设置。以上示例保留所有新功能关闭状态：
+
+- `self_reference_enabled`：开启后才允许使用机器人自身图库；`self_names` 填当前机器人的名称、别称，供原始请求的自身指向识别使用。
+- `self_keywords`：界面中的“触发关键词”，保留原字段名以兼容已有设置。最多 32 项，每项 1～80 字符，默认 `自拍`、`画`、`绘图`；可以添加绘图意图词，不限于机器人名字。MaiBot 放行本轮规划后，仅对当前最新用户发言做不区分大小写的包含匹配，命中时追加绘图判断提醒；不会在收消息时唤醒回复，也不会直接调用工具或认定主体为机器人。留空关闭提醒，已有自定义词保留。
+- `self_reference_ids`：留空时按 tag 从自我图库选一张，无命中时使用默认图。指定单张可固定形象；多张应通过工作台选择和确认。
+- `allow_chat_material_search`、`allow_web_material_search`：两个独立开关，默认均为 `false`。聊天仅在明确接续前图时读取当前聊天；网络仅为具体角色、特定物件或明确找参考图的请求搜索。外部 API 调用还须逐次选择来源，见 [API 文档](integration.md#参考与素材选项)。
+- `material_model`：默认 `vlm` 跟随视觉任务；planner、replyer 分别保存为 `task:planner`、`task:replyer`，也接受 `task:vlm`。“指定模型”保存为 `model:名称`，例如 `model:planner` 严格使用名为 `planner` 的具体模型。旧的普通名称仍按具体模型读取，不存在的名称会报错。建议选择快速多模态模型；这些设置只保存在 `workspace_settings.json`。
+- `web_search_provider`：`maibot`（默认）使用 MaiBot 已分配的搜索服务，`deepseek` 直接调用 DeepSeek Search/Fetch API。搜索失败不会自动切换服务。
+- `deepseek_api_key`：独立 DeepSeek 路径的密钥。工作台不回传已有密钥，留空保留，点击“清除已保存密钥”才清除；手动编辑 JSON 时设为 `""` 可清除。不要把真实密钥提交到仓库。MaiBot 路径的密钥在宿主搜索服务中管理。
+
+- `chat_material_search_limit`：每次任务最多读取当前聊天最近 24 小时内的消息条数，推荐默认 50 条，可设 1～200 条，不接受 0 或无限制。每个任务只读取一次，各素材需求共用最多 6 张聊天候选图；在途任务降低上限立即收紧，提高只影响新任务。
+- `multi_reference_confirmed`：记录管理员在工作台 dialog 中确认当前多图配置；不表示插件已经探测到模型支持多图，也不能绕过图生图能力与图片数量限制。不要通过手动设为 `true` 代替确认。
+
+DeepSeek 使用 `https://api.deepseek.com/v1/tools/search`，每次搜索最多返回 3 个网页。正文缺少图片链接时读取同服务的 Fetch，再按下载规则读取网页图片标记。Search API 当前不直接返回搜图候选，本插件未接入模型工具的以图搜图。最多检查 6 张候选；单个不可用网页或图片会记录原因并检查剩余候选，全部不可用时报告错误。测试功能遇到问题可在 [GitHub Issue](https://github.com/WhiteCloudOL/maimai-drawpic-plugin/issues) 反馈。
+
+图生图预设的 `reference_bindings` 是图片用途列表，例如下方**字段片段**。`asset_id` 必须从工作台上传后的预设图片中选择，不是路径、URL 或 Base64：
+
+```json
+{
+  "preset_type": "image_to_image",
+  "apply_to_image_edit": false,
+  "reference_bindings": [
+    {
+      "asset_id": "由工作台生成的图片ID",
+      "role": "scene",
+      "subject_id": "海边场景",
+      "note": "继承夕阳和背景，不继承图中人物"
+    }
+  ],
+  "multi_reference_confirmed": false
+}
+```
+
+`role` 可填 `identity`、`clothing`、`scene`、`lighting`、`composition`、`base`。多图以及单张预设图与其他输入合用，需要在工作台确认服务商模型支持多图参考。更改图片组合后重新确认。
+
+图库索引、默认图和图片版本由工作台原子写入。请通过图库上传、替换、排序、设默认和删除，不直接编辑 `reference_assets/index.json` 或替换其图片文件；直接改动可能使内容校验不匹配。图库图片不会随上传或生成缓存过期而自动删除，总上限为 100 张、128 MiB；备份时连同整个目录一起备份。
 
 仅修改普通绘图设置时，保留原文件已有的审核模板、管理员及额度规则；不要把示例整体覆盖到正在使用的配置上。
 

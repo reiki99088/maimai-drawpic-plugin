@@ -223,7 +223,7 @@ def test_task_write_failure_cannot_skip_refund(make_plugin, monkeypatch):
             assert remaining(plugin) == 1 and not calls
             assert store.get_task(receipt["task_id"]).status == "failed"
             assert store.get_task(receipt["task_id"]).persistence_pending
-            assert json.loads(store.path.read_text())["tasks"][receipt["task_id"]]["status"] == "pending"
+            assert json.loads(store.path.read_text(encoding="utf-8"))["tasks"][receipt["task_id"]]["status"] == "pending"
         finally:
             monkeypatch.setattr(store, "save", original_save)
             await plugin.on_unload()
@@ -247,7 +247,7 @@ def test_corrupt_task_schema_preserves_bytes_and_current_records(tmp_path, mutat
     cls = module("infrastructure.storage.tasks").DrawTaskStore
     store = cls(tmp_path / "tasks.json")
     record = store.create_task(session_key="session", stream_id="", task_type="draw", prompt="", model="model", provider="test", message="")
-    value = json.loads(store.path.read_text())
+    value = json.loads(store.path.read_text(encoding="utf-8"))
     mutation(value)
     store.path.write_text(json.dumps(value))
     original = store.path.read_bytes()
@@ -272,7 +272,7 @@ def test_legacy_task_schema_and_new_delivery_fields_roundtrip(tmp_path):
     restarted.load()
     current = restarted.get_task(record.task_id)
     assert current.expected_delivery_count == 2 and current.delivery_unconfirmed and current.sent_count == 1
-    payload = json.loads(store.path.read_text())
+    payload = json.loads(store.path.read_text(encoding="utf-8"))
     for key in ("submission", "expected_delivery_count", "delivery_unconfirmed", "generated_count", "error"):
         payload["tasks"][record.task_id].pop(key)
     store.path.write_text(json.dumps(payload))
@@ -299,7 +299,7 @@ def test_success_commits_quota_and_clears_reservation(make_plugin, monkeypatch):
             await asyncio.gather(*tuple(service.background_tasks))
             assert plugin._task_store.get_task(receipt["task_id"]).status == "completed"
             assert remaining(plugin) == 0
-            saved = json.loads(plugin._usage_store.path.read_text())["qq:user:12345678"]
+            saved = json.loads(plugin._usage_store.path.read_text(encoding="utf-8"))["qq:user:12345678"]
             assert saved["used"] == 1 and saved["reservation_ids"] == []
         finally:
             await plugin.on_unload()
@@ -386,15 +386,14 @@ def test_transient_quota_settlement_io_retries_same_reservation(make_plugin, mon
             assert plugin._task_store.get_task(receipt["task_id"]).status == ("completed" if success else "failed")
             assert len(provider_calls) == 1 and len(writes) == 2
             assert remaining(plugin) == (0 if success else 1)
-            assert json.loads(store.path.read_text())["qq:user:12345678"]["reservation_ids"] == []
+            assert json.loads(store.path.read_text(encoding="utf-8"))["qq:user:12345678"]["reservation_ids"] == []
         finally:
             monkeypatch.setattr(store, "save", original_save)
             await plugin.on_unload()
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("version", [1, 2])
-def test_cancel_during_completion_preserves_actual_success(make_plugin, monkeypatch, version):
+def test_cancel_during_completion_preserves_actual_success(make_plugin, monkeypatch):
     async def run():
         plugin = await configured_plugin(make_plugin, monkeypatch)
         service = plugin._require_draw_service()
@@ -420,20 +419,15 @@ def test_cancel_during_completion_preserves_actual_success(make_plugin, monkeypa
         monkeypatch.setattr(service.stream_service, "send_generated_images_with_fallback", send)
         monkeypatch.setattr(plugin._task_store, "update_task", update)
         try:
-            receipt = await plugin.drawpic_submit_v2("cat", stream_id="mock-stream", request_id="cancel-completed")
+            receipt = await plugin.drawpic_submit("cat", stream_id="mock-stream", request_id="cancel-completed")
             assert await asyncio.to_thread(entered.wait, 5)
-            cancel = plugin.drawpic_cancel_v2 if version == 2 else plugin.drawpic_cancel
-            cancelling = asyncio.create_task(cancel(receipt["task_id"]))
+            cancelling = asyncio.create_task(plugin.drawpic_cancel(receipt["task_id"]))
             await asyncio.sleep(0.02)
             assert not cancelling.done()
             release.set()
-            if version == 2:
-                result = await cancelling
-                assert result["status"] == "completed" and result["cancel_requested"]
-                assert result["error"] is None and result["delivery"]["status"] == "sent"
-            else:
-                with pytest.raises(ValueError, match="已经结束"):
-                    await cancelling
+            result = await cancelling
+            assert result["status"] == "completed" and result["cancel_requested"]
+            assert result["error"] is None and result["delivery"]["status"] == "sent"
             assert plugin._task_store.get_task(receipt["task_id"]).status == "completed"
             assert len(sends) == len(provider_calls) == 1 and remaining(plugin) == 0
             assert plugin._usage_store.records["qq:user:12345678"].reservation_ids == []
@@ -474,9 +468,9 @@ def test_cancellation_waits_for_owned_status_io(make_plugin, monkeypatch, stage)
         monkeypatch.setattr(service, "_run_image_request_attempt", generate)
         monkeypatch.setattr(store, "update_task", update)
         try:
-            receipt = await plugin.drawpic_submit_v2("cat", stream_id="mock-stream", request_id="cancel-status-io")
+            receipt = await plugin.drawpic_submit("cat", stream_id="mock-stream", request_id="cancel-status-io")
             assert await asyncio.to_thread(entered.wait, 5)
-            cancelling = asyncio.create_task(plugin.drawpic_cancel_v2(receipt["task_id"]))
+            cancelling = asyncio.create_task(plugin.drawpic_cancel(receipt["task_id"]))
             await asyncio.sleep(0.02)
             assert not cancelling.done()
             release.set()

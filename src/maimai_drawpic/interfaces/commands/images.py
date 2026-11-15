@@ -1,11 +1,11 @@
 """commands/images.py 的插件组件。"""
 
-from ...infrastructure.observability.redaction import outward_error
-
 from typing import Any
 import asyncio
 import re
 
+from ...application.access import ChatAccessDenied
+from ...infrastructure.observability.redaction import outward_error
 from ..chat.message_images import SourceImageInput, collect_command_source_image_inputs, decode_image_base64
 from ...domain.task_errors import ModelAccessError
 
@@ -148,6 +148,9 @@ class ImageCommandMixin:
             )
             start_result = await self._start_background_image_request(
                 defer_prompt_review=True,
+                use_reference_features=True,
+                reference_options={"user_request": "/绘图 图生图 " + rest_payload},
+                reference_task_type="edit_image",
                 prompt=prompt,
                 stream_id=stream_id,
                 requested_model=resolved_model,
@@ -162,6 +165,8 @@ class ImageCommandMixin:
                 notify_start=True,
                 announce_queue=True,
             )
+        except ChatAccessDenied:
+            raise
         except ModelAccessError as exc:
             await self._send_command_reply(
                 title="无权使用该模型",

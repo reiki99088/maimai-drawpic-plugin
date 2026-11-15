@@ -1,8 +1,12 @@
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, Optional
 
 from ...domain.models.openai_profiles import OPENAI_COMPATIBILITY_MODES, normalize_openai_mode
+from ...domain.models.aliyun_profiles import resolve_aliyun_model_profile
+from ...domain.parameters import negative_prompt_option_parts, parse_key_value_options, v4_negative_prompt_option
 from ...domain.configuration.models import DrawpicConfig, OpenAICompatibilityMode
+from ...domain.configuration.platforms.common import NegativePromptConfig
+from ...domain.styles import deduplicate_negative_prompt
 from .types import ImageProvider, OpenAIModelRoute
 from .construction import ProviderConstructionMixin
 from .catalog import ModelCatalogMixin
@@ -113,6 +117,8 @@ class ProviderRouter(ProviderConstructionMixin, ModelCatalogMixin, TaskCapabilit
             return self.config.google.rewrite_prompt_to_english
         if normalized_provider == "zhipu":
             return self.config.zhipu.rewrite_prompt_to_english
+        if normalized_provider == "minimax":
+            return self.config.minimax.rewrite_prompt_to_english
         if normalized_provider == "volcengine":
             return self.config.volcengine.rewrite_prompt_to_english
         if normalized_provider == "siliconflow":
@@ -122,6 +128,64 @@ class ProviderRouter(ProviderConstructionMixin, ModelCatalogMixin, TaskCapabilit
         if normalized_provider == "comfyui":
             return self.config.comfyui.rewrite_prompt_to_english
         return False
+
+    def get_negative_prompt_config(self, model: str) -> NegativePromptConfig:
+        """读取当前模型实际归属实例的反向词设置，兼容旧 OpenAI 实例。"""
+
+        provider_name = self.get_model_provider(model)
+        if provider_name == "openai":
+            route = self.resolve_openai_model_route(model)
+            if route is not None:
+                return route.negative_prompt_config
+        if not provider_name:
+            raise ValueError(f"模型未归属于任何已配置提供商：{model}")
+        return self.config.__dict__[provider_name]
+
+    def resolve_negative_prompt(self, model: str, request_negative_prompt: str, task_type: str) -> str:
+        """过滤调用方反向词并追加当前实例的默认词，先于风格渲染及英文改写。"""
+
+        config = self.get_negative_prompt_config(model)
+        if not config.negative_prompt_enabled:
+            return ""
+        legacy_default = ""
+        if self.get_model_provider(model) == "comfyui":
+            comfyui = self.config.comfyui
+            prompt_mode, task_default = (
+                (comfyui.i2i_prompt_mode, comfyui.i2i_negative_prompt)
+                if task_type == "edit_image"
+                else (comfyui.t2i_prompt_mode, comfyui.t2i_negative_prompt)
+            )
+            if prompt_mode == "positive_negative":
+                legacy_default = task_default
+        extra_parts = negative_prompt_option_parts(
+            self._negative_prompt_extra_parameters(model),
+            allow_character_captions=self.get_model_provider(model) == "novelai",
+        )
+        return deduplicate_negative_prompt(request_negative_prompt, config.negative_prompt, legacy_default, *extra_parts)
+
+    def resolve_v4_negative_prompt(self, model: str) -> Optional[Dict[str, Any]]:
+        """角色反向词只从当前 NAI 实例读取，关闭时连同旧扩展参数一起忽略。"""
+
+        if not self.get_negative_prompt_config(model).negative_prompt_enabled:
+            return None
+        return v4_negative_prompt_option(self._negative_prompt_extra_parameters(model))
+
+    def _negative_prompt_extra_parameters(self, model: str) -> Dict[str, Any]:
+        """只读取当前实例、当前模型协议实际使用的扩展参数。"""
+
+        provider_name = self.get_model_provider(model)
+        if provider_name == "comfyui":
+            return {}
+        if provider_name == "openai":
+            route = self.resolve_openai_model_route(model)
+            if route is not None:
+                return route.extra_parameters
+        field = "extra_parameters"
+        if provider_name == "aliyun":
+            family = resolve_aliyun_model_profile(model).family
+            if family != "legacy":
+                field = f"{family}_extra_parameters"
+        return parse_key_value_options(self.get_negative_prompt_config(model).__dict__[field])
 
     def resolve_model_name(self, model: str = "", allow_unknown_model: bool = False) -> str:
         """解析最终使用的模型名。"""

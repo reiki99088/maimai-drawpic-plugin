@@ -3,12 +3,45 @@
 from maibot_sdk import API
 from typing import Any, Dict
 import asyncio
+import base64
 
 from .base import WorkspaceAPIBase, workspace_endpoint
 from ...infrastructure.storage.platforms import parse_json_object
 
 
 class WebUIAPIMixin(WorkspaceAPIBase):
+    @API("workspace_references", version="1")
+    @workspace_endpoint
+    async def workspace_references(self) -> Dict[str, Any]:
+        return await asyncio.to_thread(self._workspace().tasks.references.snapshot)
+
+    @API("workspace_reference_image", version="1")
+    @workspace_endpoint
+    async def workspace_reference_image(self, asset_id: str) -> Dict[str, Any]:
+        from ...infrastructure.storage.results import ImageResultStore
+
+        def preview() -> Dict[str, str]:
+            store = self._workspace().tasks.references
+            item = next((item for item in store.snapshot()["assets"] if item["id"] == asset_id), None)
+            if item is None:
+                raise ValueError("参考图片不存在")
+            image = store.read(asset_id, kind=item["kind"])
+            raw = ImageResultStore._preview(image.raw, 480, 40000)
+            return {"preview": "data:image/webp;base64," + base64.b64encode(raw).decode("ascii")}
+
+        return await asyncio.to_thread(preview)
+
+    @API("workspace_reference_update", version="1")
+    @workspace_endpoint
+    async def workspace_reference_update(self, operation: str, revision: int, asset_json: str = "{}", source_id: str = "") -> Dict[str, Any]:
+        workspace = self._workspace()
+        values = parse_json_object(asset_json)
+        if values.keys() - {"asset_id", "name", "tags", "kind", "position", "prompt"}:
+            raise ValueError("参考图片包含未知字段")
+
+        raw = (await workspace.tasks._sources([source_id], []))[0] if source_id else None
+        return await workspace.update_reference(operation, revision, values, raw)
+
     @API("workspace_provider_models", version="1")
     @workspace_endpoint
     async def workspace_provider_models(self, provider_json: str) -> Dict[str, Any]:
@@ -70,7 +103,7 @@ class WebUIAPIMixin(WorkspaceAPIBase):
         values = parse_json_object(request_json)
         allowed = {
             "prompt", "model", "negative_prompt", "style", "task_type", "stream_id", "source_ids", "request_id",
-            "animated", "frame_count", "frame_duration_ms", "world_knowledge",
+            "reference_options_json", "animated", "frame_count", "frame_duration_ms", "world_knowledge",
         }
         if values.keys() - allowed:
             raise ValueError("绘图请求包含未知参数")

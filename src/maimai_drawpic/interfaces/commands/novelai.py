@@ -1,10 +1,10 @@
 """commands/novelai.py 的插件组件。"""
 
-from ...infrastructure.observability.redaction import outward_error
-
 from typing import Any
 import asyncio
 
+from ...application.access import ChatAccessDenied
+from ...infrastructure.observability.redaction import outward_error
 from ..chat.texts import build_novelai_text
 
 
@@ -255,6 +255,9 @@ class NovelAICommandMixin:
                 raise ValueError("NAI 文生图提示词不能为空")
             result = await self._start_background_image_request(
                 defer_prompt_review=True,
+                use_reference_features=forced_task_type != "draw",
+                reference_options={"user_request": "/绘图 nai " + rest_payload},
+                reference_task_type="" if forced_task_type == "auto" else forced_task_type,
                 prompt=positive_prompt,
                 request_negative_prompt=negative_prompt,
                 requested_model=model,
@@ -268,6 +271,8 @@ class NovelAICommandMixin:
                 platform_name=platform,
                 notify_start=True,
             )
+        except ChatAccessDenied:
+            raise
         except Exception as exc:
             self.ctx.logger.error("/绘图 nai 命令启动失败: %s", exc, exc_info=True)
             await self._send_draw_failure_notice(

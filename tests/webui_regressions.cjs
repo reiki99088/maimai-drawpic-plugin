@@ -10,6 +10,7 @@ const source = path.join(__dirname, '../src/maimai_drawpic/interfaces/webui/src'
 const read = name => fs.readFileSync(path.join(source, name), 'utf8');
 const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
 const event = { preventDefault() {} };
+const referenceDefaults = { self_reference_enabled: false, self_names: ['麦麦'], self_reference_ids: [], multi_reference_confirmed: false, allow_chat_material_search: false, chat_material_search_limit: 50, material_model: "vlm", allow_web_material_search: false, web_search_provider: 'maibot', deepseek_api_key: '' };
 function deferred() {
   let resolve, reject;
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
@@ -23,8 +24,10 @@ function node(values = {}) {
     setAttribute(k, v) { this.attrs[k] = v; },
     removeAttribute(k) { delete this.attrs[k]; },
     addEventListener(k, fn) { this.listeners[k] = fn; },
+    append(...nodes) { this.children.push(...nodes); },
+    replaceWith() {},
     querySelectorAll() { return []; },
-    classList: { toggle() {} }, contains() { return false; }, focus() {}, ...values };
+    classList: { toggle() {} }, contains() { return false; }, focus() {}, scrollIntoView() {}, ...values };
 }
 function harness(file, extra = {}) {
   const nodes = new Map();
@@ -36,6 +39,9 @@ function harness(file, extra = {}) {
   let timerId = 0;
   const U = { state: { view: file, dirty: false, busy: 0, modalVersion: 0 },
     views: {}, $: get, e: String, icon: () => '', bindSubmit() {}, bindDirty() {},
+    selects: { refresh() {} },
+    motion: { enter() {}, loading() {}, segmented() {} },
+    formControls: { secret: () => () => false },
     toast() {}, savedNotice() {}, error: e => errors.push(e),
     call(kind, name, args) {
       const d = deferred(); calls.push({ kind, name, args, ...d }); return d.promise;
@@ -171,7 +177,7 @@ test('platform: save freezes all fields and rejects repeated submissions', async
 test('platform: failed saves retain the draft and unfreeze the form', async () => {
   const h = await platform();
   h.get('#provider-name').value = 'keep draft'; h.U.state.dirty = true;
-  h.form.onsubmit(event); h.calls[0].reject(Error('conflict')); await flush();
+  h.form.onsubmit(event); await flush(); h.calls[0].reject(Error('conflict')); await flush();
   assert.equal(h.form.inert, false); assert.equal(h.form.attrs['aria-busy'], undefined);
   assert.equal(h.get('#provider-name').value, 'keep draft');
   assert.equal(h.U.state.dirty, true); assert.equal(h.stats().closes, 0);
@@ -196,7 +202,7 @@ test('platform: durable-save warnings survive refresh errors without another sav
   const notices = [];
   h.U.bootstrap = async () => { throw Error('read unavailable'); };
   h.U.savedNotice = (...args) => notices.push(args);
-  h.U.state.dirty = true; h.form.onsubmit(event);
+  h.U.state.dirty = true; h.form.onsubmit(event); await flush();
   const response = { saved: true, recovery_pending: true, warning: 'Saved; recovery pending' };
   h.calls[0].resolve(response); await flush();
   assert.equal(h.calls.length, 1); assert.equal(h.errors.length, 0);
@@ -222,20 +228,21 @@ test('platform: a completed deletion cannot rerender a newer settings draft', as
   h.calls[0].resolve({ saved: true }); await flush();
   assert.equal(h.stats().renders, 0); assert.equal(h.U.state.dirty, true);
 });
-async function settings() {
+async function settings(view = 'settings') {
   let h;
-  const tabs = ['general', 'review', 'style', 'knowledge'].map(section => node({ dataset: { section } }));
+  const tabs = (view === 'library' ? ['style', 'references', 'materials'] : ['general', 'review', 'access', 'knowledge']).map(section => node({ dataset: { section } }));
   h = harness('settings', {
+    referenceUI: { gallery() {}, confirmButton() {}, presetTypes() {}, confirmSettings: async () => true },
     forms: { html: () => '', bind: (panel, fields, values) => {
-      panel.values = structuredClone(values); return () => structuredClone(panel.values);
+      panel.fields = fields; panel.values = structuredClone(values); return () => structuredClone(panel.values);
     } },
     bootstrap: async () => {}, render: async () => {},
     submitForm: form => form.onsubmit(event),
   });
-  h.U.state.data = { revision: 7,
-    schema: { sections: { general: { fields: { timeout: {}, prompt_review_enabled: {}, world_knowledge_enabled: {} } }, style: { fields: { presets: {} } } } },
-    settings: { general: { timeout: 150, prompt_review_enabled: false, world_knowledge_enabled: false }, style: { presets: [] } },
-    defaults: { general: { timeout: 150, prompt_review_enabled: false, world_knowledge_enabled: false }, style: { presets: [] } } };
+  h.U.state.data = { revision: 7, reference_fields: { self_reference_enabled: {}, self_reference_ids: {}, multi_reference_confirmed: {}, allow_chat_material_search: {}, chat_material_search_limit: {}, material_model: {}, allow_web_material_search: {}, web_search_provider: {}, deepseek_api_key: {} },
+    schema: { sections: { general: { fields: { timeout: {}, prompt_review_enabled: {}, integration_api_enabled: {}, group_access_ids: {}, private_access_mode: {}, admin_user_ids: {}, group_default_quota: {}, world_knowledge_enabled: {} } }, style: { fields: { presets: {} } } } },
+    settings: { general: { references: structuredClone(referenceDefaults), timeout: 150, prompt_review_enabled: false, integration_api_enabled: true, group_access_ids: [], private_access_mode: 'blacklist', admin_user_ids: [], group_default_quota: 10, world_knowledge_enabled: false }, style: { presets: [] } },
+    defaults: { general: { references: structuredClone(referenceDefaults), timeout: 150, prompt_review_enabled: false, integration_api_enabled: true, group_access_ids: [], private_access_mode: 'blacklist', admin_user_ids: [], group_default_quota: 10, world_knowledge_enabled: false }, style: { presets: [] } } };
   const form = h.get('#settings-form');
   form.querySelector = () => null;
   form.append = panel => form.children.push(panel);
@@ -244,23 +251,37 @@ async function settings() {
   h.document.querySelectorAll = selector => selector === '[data-section]' ? tabs : [];
   // Controllers capture U.$ when loaded, so reload after installing the scoped seam.
   h.run('settings');
-  await h.U.views.settings();
-  return { ...h, form, tabs };
+  h.U.state.view = view;
+  await h.U.views[view]();
+  return { ...h, form, tabs, panel: name => form.children.find(panel => panel.dataset.settingsPanel === name) };
 }
-test('settings: all three category drafts survive switching and submit in one snapshot', async () => {
+test('settings: runtime drafts survive category changes and preserve creative configuration', async () => {
   const h = await settings();
-  h.form.children[0].values.timeout = 231;
-  h.form.children[1].values.prompt_review_enabled = true;
-  h.form.children[2].values.presets.push({ name: 'draft', positive_prompt_template: '{prompt}' });
+  h.panel('general').values.timeout = 231;
+  h.panel('review').values.prompt_review_enabled = true;
+  h.panel('general').values.integration_api_enabled = false;
+  h.panel('access').values.group_access_ids = ['123456'];
+  h.panel('access').values.private_access_mode = 'whitelist';
+  h.panel('access').values.admin_user_ids = ['10001'];
+  h.panel('access').values.group_default_quota = 20;
+  assert.deepEqual(Object.keys(h.panel('general').fields), ['timeout', 'integration_api_enabled']);
+  assert.deepEqual(Object.keys(h.panel('access').fields), ['group_access_ids', 'private_access_mode', 'admin_user_ids', 'group_default_quota']);
   h.U.state.dirty = true;
   h.tabs[1].onclick(); h.tabs[2].onclick(); h.tabs[0].onclick();
-  assert.equal(h.form.children[0].values.timeout, 231);
+  assert.equal(h.panel('general').values.timeout, 231);
   h.form.onsubmit(event); h.form.onsubmit(event);
+  await flush();
   assert.equal(h.calls.length, 1); assert.equal(h.form.inert, true);
   const submitted = JSON.parse(h.calls[0].args.config_json);
   assert.equal(submitted.general.timeout, 231);
+  assert.equal(submitted.general.references.allow_web_material_search, false);
   assert.equal(submitted.general.prompt_review_enabled, true);
-  assert.equal(submitted.style.presets[0].name, 'draft');
+  assert.equal(submitted.general.integration_api_enabled, false);
+  assert.deepEqual(submitted.general.group_access_ids, ['123456']);
+  assert.equal(submitted.general.private_access_mode, 'whitelist');
+  assert.deepEqual(submitted.general.admin_user_ids, ['10001']);
+  assert.equal(submitted.general.group_default_quota, 20);
+  assert.deepEqual(submitted.style.presets, []);
   h.calls[0].resolve({ saved: true }); await flush();
   assert.equal(h.U.state.dirty, false);
 });
@@ -276,13 +297,82 @@ test('settings: world knowledge fields get their own tab and save into general',
   assert.equal(submitted.general.world_knowledge_enabled, true);
   assert.equal(submitted.general.timeout, 150);
 });
+test('creative: preset, self-reference and material drafts merge without overwriting one another', async () => {
+  const h = await settings('library');
+  h.panel('style').values.presets.push({ name: 'draft' });
+  h.panel('references').values.self_reference_enabled = true;
+  h.panel('materials').values.allow_web_material_search = true;
+  h.panel('materials').values.chat_material_search_limit = 80;
+  h.panel('materials').values.material_model = 'fast-vision';
+  assert.ok(Object.hasOwn(h.panel('materials').fields, 'chat_material_search_limit'));
+  assert.equal(Object.hasOwn(h.panel('references').fields, 'chat_material_search_limit'), false);
+  h.tabs[1].onclick(); h.tabs[2].onclick(); h.tabs[0].onclick();
+  h.U.state.dirty = true;
+  h.form.onsubmit(event); await flush();
+  const submitted = JSON.parse(h.calls[0].args.config_json);
+  assert.equal(submitted.style.presets[0].name, 'draft');
+  assert.equal(submitted.general.references.self_reference_enabled, true);
+  assert.equal(submitted.general.references.allow_web_material_search, true);
+  assert.equal(submitted.general.references.chat_material_search_limit, 80);
+  assert.equal(submitted.general.references.material_model, 'fast-vision');
+  assert.equal(submitted.general.timeout, 150);
+  assert.deepEqual(submitted.general.admin_user_ids, []);
+  h.calls[0].resolve({ saved: true }); await flush();
+  assert.equal(h.U.state.dirty, false);
+});
+
+test('creative: cancelling multi-image confirmation preserves panels and credential drafts', async () => {
+  const h = await settings('library');
+  const panels = [...h.form.children];
+  h.panel('references').values.self_reference_ids = ['first', 'second'];
+  h.panel('materials').values.deepseek_api_key = 'fake-key-draft';
+  h.U.state.dirty = true;
+  h.U.referenceUI.confirmSettings = async () => false;
+  h.form.onsubmit(event); await flush();
+  assert.deepEqual(h.form.children, panels);
+  assert.deepEqual(h.panel('references').values.self_reference_ids, ['first', 'second']);
+  assert.equal(h.panel('materials').values.deepseek_api_key, 'fake-key-draft');
+  assert.equal(h.U.state.dirty, true);
+  assert.equal(h.calls.length, 0);
+  h.U.referenceUI.confirmSettings = async () => true;
+  h.form.onsubmit(event); await flush();
+  assert.equal(h.calls.length, 1);
+  assert.equal(JSON.parse(h.calls[0].args.config_json).general.references.deepseek_api_key, 'fake-key-draft');
+  h.calls[0].resolve({ saved: true }); await flush();
+});
+
+test('creative: a detached form cannot save after a pending confirmation', async () => {
+  const h = await settings('library'), confirmation = deferred();
+  h.U.referenceUI.confirmSettings = () => confirmation.promise;
+  h.form.onsubmit(event); await flush();
+  h.form.isConnected = false;
+  h.U.state.view = 'tasks';
+  confirmation.resolve(true); await flush();
+  assert.equal(h.calls.length, 0);
+});
+
+test('references: declining multi-image confirmation leaves the proposed references intact', async () => {
+  const h = harness('references');
+  const dialog = node({ showModal() {}, remove() {}, close() { this.listeners.close(); } });
+  h.document.body = { append() {} };
+  h.document.createElement = () => dialog;
+  const all = { general: { references: { ...referenceDefaults, self_reference_enabled: true, self_reference_ids: ['first', 'second'] } },
+    style: { presets: [{ name: '多人', reference_bindings: [{ asset_id: 'a' }, { asset_id: 'b' }], multi_reference_confirmed: false }] } };
+  const previous = { general: { references: structuredClone(referenceDefaults) }, style: { presets: [] } };
+  const before = JSON.stringify(all);
+  const result = h.U.referenceUI.confirmSettings(all, previous);
+  h.get('[data-cancel]').onclick();
+  assert.equal(await result, false);
+  assert.equal(JSON.stringify(all), before);
+});
+
 test('settings: failed saves retain both category drafts and allow editing', async () => {
   const h = await settings();
-  h.form.children[0].values.timeout = 245;
-  h.form.children[2].values.presets.push({ name: 'keep' }); h.U.state.dirty = true;
-  h.form.onsubmit(event); h.calls[0].reject(Error('revision conflict')); await flush();
-  assert.equal(h.form.children[0].values.timeout, 245);
-  assert.equal(h.form.children[2].values.presets[0].name, 'keep');
+  h.panel('general').values.timeout = 245;
+  h.panel('review').values.prompt_review_enabled = true; h.U.state.dirty = true;
+  h.form.onsubmit(event); await flush(); h.calls[0].reject(Error('revision conflict')); await flush();
+  assert.equal(h.panel('general').values.timeout, 245);
+  assert.equal(h.panel('review').values.prompt_review_enabled, true);
   assert.equal(h.U.state.dirty, true); assert.equal(h.form.inert, false);
   assert.equal(h.get('#reset-settings').disabled, false);
 });
@@ -290,7 +380,7 @@ test('settings: saved-but-unreadable state warns and prevents resubmission until
   const h = await settings(), notices = [];
   h.U.bootstrap = async () => { throw Error('bootstrap failed'); };
   h.U.savedNotice = (...args) => notices.push(args);
-  h.U.state.dirty = true; h.form.onsubmit(event);
+  h.U.state.dirty = true; h.form.onsubmit(event); await flush();
   const response = { saved: true, runtime_refresh_pending: true, warning: 'Runtime refresh pending' };
   h.calls[0].resolve(response); await flush();
   assert.equal(h.U.state.dirty, false); assert.equal(h.form.inert, true);
@@ -301,7 +391,7 @@ test('settings: saved-but-unreadable state warns and prevents resubmission until
   assert.match(notices[0][2].message, /bootstrap failed/);
 });
 test('settings: stale completion leaves newer dirty state alone', async () => {
-  const h = await settings(); h.form.onsubmit(event);
+  const h = await settings(); h.form.onsubmit(event); await flush();
   h.form.isConnected = false; h.U.state.dirty = true;
   h.calls[0].resolve({ saved: true }); await flush();
   assert.equal(h.U.state.dirty, true);
@@ -327,12 +417,59 @@ test('forms: scalar hints link to controls and nested arrays have legends with u
       item_fields: { positive_prompt_template: { type: 'string', default: '', label: 'Prompt', hint: '{prompt}' } } },
   }, { presets: [{ positive_prompt_template: 'one' }, { positive_prompt_template: 'two' }] });
   assert.match(html, /<input id="(field-\d+)" aria-describedby="\1-hint"/);
-  assert.match(html, /<fieldset[^>]*aria-describedby="field-\d+-hint"><legend>Presets<\/legend>/);
+  assert.match(html, /<fieldset[^>]*aria-describedby="field-\d+-hint"><legend class="field-heading">Presets<\/legend>/);
   assert.equal((html.match(/<textarea id="(field-\d+)" aria-describedby="\1-hint"/g) || []).length, 2);
   const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map(m => m[1]);
   assert.equal(ids.length, new Set(ids).size);
   for (const [, id] of html.matchAll(/(?:for|aria-describedby)="([^"]+)"/g)) assert.ok(ids.includes(id));
 });
+test('forms: credential defaults stay blank instead of inserting configuration placeholders', () => {
+  const h = harness('forms');
+  const html = h.U.forms.html({
+    api_key: { type: 'string', label: 'API Key', default: 'your-placeholder-api-key' },
+    password: { type: 'string', label: 'Password', default: 'your-placeholder-password' },
+  }, {});
+  assert.match(html, /data-input="api_key" value=""/);
+  assert.match(html, /data-input="password" value=""/);
+  assert.doesNotMatch(html, /your-placeholder-/);
+});
+
+test('forms: wrapped platform fields read edited values and exclude nested object names', () => {
+  const h = harness('forms');
+  const arrayField = node({ dataset: { field: 'presets' } });
+  const nested = node({ dataset: { field: 'name' }, parentElement: { closest: () => arrayField } });
+  const outer = node({ dataset: { field: 'name' }, parentElement: { closest: () => null } });
+  const input = node({ value: 'changed-after-opening' });
+  const root = node({ contains: n => n === arrayField,
+    querySelectorAll: selector => selector === '[data-field]' ? [nested, outer] : [] });
+  h.U.$ = selector => selector === '[data-input]' ? input : null;
+  h.run('forms');
+  const result = h.U.forms.read({ name: { type: 'string', label: 'Name' } }, { name: 'original' }, root);
+  assert.equal(result.name, 'changed-after-opening');
+  root.querySelectorAll = () => [];
+  assert.throws(() => h.U.forms.read({ name: { type: 'string', label: 'Name' } }, {}, root), /未找到.*Name/);
+});
+
+test('forms: node IDs use single-line controls and uint64 seeds round-trip without Number rounding', () => {
+  const h = harness('forms');
+  const meta = { type: 'integer', label: 'Seed', default: -1, min: -1, max: '18446744073709551615' };
+  const html = h.U.forms.html({ seed: meta, t2i_prompt_node_id: { type: 'string', label: 'Node' },
+    prompt_input_name: { type: 'string', label: 'Field' } }, { seed: '18446744073709551615' });
+  assert.match(html, /type="text" inputmode="numeric"[^>]*data-exact-integer/);
+  assert.match(html, /<input[^>]*data-input="t2i_prompt_node_id"/);
+  assert.match(html, /<input[^>]*data-input="prompt_input_name"/);
+  const field = node({ dataset: { field: 'seed' }, parentElement: { closest: () => null } });
+  const input = node({ value: '18446744073709551615', hasAttribute: name => name === 'data-exact-integer' });
+  const root = node({ contains: () => false, querySelectorAll: () => [field] });
+  h.U.$ = selector => selector === '[data-input]' ? input : null;
+  h.run('forms');
+  assert.equal(h.U.forms.read({ seed: meta }, {}, root).seed, '18446744073709551615');
+  input.value = '18446744073709551616';
+  assert.throws(() => h.U.forms.read({ seed: meta }, {}, root), /超出允许范围/);
+  input.value = '0';
+  assert.equal(h.U.forms.read({ seed: meta }, {}, root).seed, 0);
+});
+
 test('invalid default model: diagnostics remain linked to the configuration control', () => {
   const h = harness('forms');
   h.U.state.data = { models: [], default_model: '', default_model_error: 'Ambiguous model',
@@ -396,14 +533,82 @@ test('mode state, mobile save label and allowed animations stay explicit', () =>
   assert.match(studio, /id="mode-draw" aria-pressed="\$\{mode === "draw"\}"/);
   assert.match(studio, /id="mode-edit" aria-pressed="\$\{mode === "edit_image"\}"/);
   assert.doesNotMatch(studio, /duration: 190|translateY\(-5px\)/);
-  assert.match(read('index.html'), /class="save-label-short" aria-hidden="true">保存<\/span>/);
+  assert.match(read('index.html'), /class="action-tag" aria-hidden="true">保存全部设置<\/span>/);
+});
+
+test('submit: ordinary input Enter and IME never start a drawing in shortcut-only forms', () => {
+  const source = read('app.js');
+  const code = source.slice(source.indexOf('  function bindSubmit('), source.indexOf('  window.DrawpicUI ='));
+  for (const [options, keys, tagName, expected] of [
+    [{ shortcutOnly: true }, {}, 'INPUT', 0],
+    [{ shortcutOnly: true }, {}, 'TEXTAREA', 0],
+    [{ shortcutOnly: true }, { ctrlKey: true }, 'TEXTAREA', 1],
+    [{ shortcutOnly: true }, { metaKey: true }, 'INPUT', 1],
+    [{ shortcutOnly: true }, { ctrlKey: true, isComposing: true }, 'INPUT', 0],
+    [{}, {}, 'INPUT', 1],
+    [{}, { isComposing: true }, 'INPUT', 0],
+    [{}, { defaultPrevented: true }, 'INPUT', 0],
+  ]) {
+    let submissions = 0, keydown;
+    const form = { querySelectorAll: () => [], addEventListener: (_name, handler) => { keydown = handler; } };
+    const bind = new Function('submitForm', code + ';return bindSubmit;')(() => { submissions++; });
+    bind(form, options);
+    keydown({ key: 'Enter', target: { tagName }, preventDefault() {}, ...keys });
+    assert.equal(submissions, expected, JSON.stringify({ options, keys, tagName }));
+  }
+});
+
+test('tag control: IME stays intact, Enter commits unique tags, limits preserve the pending draft', () => {
+  const h = harness('forms');
+  let values = ['自拍'], inputEvents = 0;
+  const input = node({ value: '画,自拍，绘图', validationMessage: '',
+    setCustomValidity(value) { this.validationMessage = value; }, reportValidity() {},
+    insertAdjacentHTML(_position, html) { values.push(html.match(/data-tag-value value="([^"]*)"/)[1]); },
+    closest: () => input });
+  const control = node({ dataset: { control: 'tags', limit: '3', maxLength: '80' },
+    dispatchEvent() { inputEvents++; }, querySelectorAll: () => values.map(value => ({ value })) });
+  input.parentElement = control;
+  h.nodes.set('[data-tag-entry]', input);
+  const listeners = {};
+  h.U.formControls.bind({ addEventListener(name, fn) { listeners[name] = fn; } });
+  let prevented = 0;
+  const key = { target: input, key: 'Enter', preventDefault() { prevented++; } };
+  listeners.keydown({ ...key, isComposing: true });
+  assert.equal(input.value, '画,自拍，绘图'); assert.equal(prevented, 0);
+  listeners.keydown({ ...key, ctrlKey: true });
+  assert.equal(prevented, 0);
+  h.context.Event = class Event {};
+  listeners.keydown(key);
+  assert.deepEqual(values, ['自拍', '画', '绘图']); assert.equal(input.value, '');
+  assert.equal(prevented, 1); assert.equal(inputEvents, 1);
+  input.value = '多余项';
+  assert.throws(() => h.U.formControls.read(control), /最多 3 项/);
+  assert.equal(input.value, '多余项'); assert.deepEqual(values, ['自拍', '画', '绘图']);
+  input.value = ''; values.pop(); input.value = '重绘';
+  assert.deepEqual([...h.U.formControls.read(control)], ['自拍', '画', '重绘']);
+});
+
+test('recognition model control distinguishes the default task from a concrete model with the same name', () => {
+  const h = harness('forms'), control = { dataset: { control: 'recognition-model' } };
+  const alias = h.U.formControls.scalar('material_model', {}, 'task:vlm', 'material-model');
+  assert.match(alias, /<option value="vlm" selected>/);
+  assert.doesNotMatch(alias, /value="task:vlm"/);
+  h.get('[data-choice-select]').value = '__workspace_custom__';
+  h.get('[data-custom-value]').value = ' vlm ';
+  assert.equal(h.U.formControls.read(control), 'model:vlm');
+  h.get('[data-choice-select]').value = 'vlm';
+  assert.equal(h.U.formControls.read(control), 'vlm');
+  for (const task of ['task:planner', 'task:replyer']) {
+    h.get('[data-choice-select]').value = task;
+    assert.equal(h.U.formControls.read(control), task);
+  }
 });
 
 // Use the actual production bridge queue: ordering bugs must not be tested with
 // independently resolving RPC promises that the application cannot issue.
 function fifoController(file = 'studio') {
   const state = { view: file, busy: 0, lastTask: null, sources: [],
-    data: { models: [{ name: 'model', draw: true }], presets: [], default_model: 'model' },
+    data: { models: [{ name: 'model', draw: true }], presets: [], default_model: 'model', settings: { general: { references: structuredClone(referenceDefaults) }, style: { default_style: '', image_edit_presets_enabled: false, default_image_edit_preset: '' } } },
     taskPage: 1, taskStatus: '', taskSearch: '' };
   const calls = [];
   const bridge = (name, args) => {
@@ -422,6 +627,36 @@ const taskSnapshot = (id, extra = {}) => ({ task_id: id, images: [], status: 'ru
   message: id, model: 'model', ...extra });
 const taskList = active => ({ counts: { pending: 0, running: active, completed: 0, failed: 0, rejected: 0 },
   items: [], total: 0, page_size: 20 });
+test('studio: rebuilding a mode retains the loaded conversations and selected destination', async () => {
+  const h = fifoController();
+  h.get('#chat-platform').value = 'qq';
+  await h.U.views.studio();
+  h.get('#load-streams').onclick({ currentTarget: h.get('#load-streams') }); await flush();
+  h.calls[0].resolve({ streams: [{ id: 'demo-chat', name: '演示群聊' }] }); await flush();
+  h.get('#draw-stream').value = 'demo-chat';
+  h.get('#draw-form').oninput();
+  h.nodes.set('#draw-stream', node());
+  await h.U.views.studio();
+  assert.match(h.get('#draw-stream').innerHTML, /演示群聊/);
+  assert.equal(h.get('#draw-stream').value, 'demo-chat');
+  assert.equal(h.calls.length, 1);
+});
+
+test('studio: an old conversation response cannot overwrite a different platform or form', async () => {
+  const h = fifoController();
+  h.get('#chat-platform').value = 'qq';
+  await h.U.views.studio();
+  h.get('#load-streams').onclick({ currentTarget: h.get('#load-streams') }); await flush();
+  h.get('#chat-platform').value = 'other';
+  h.get('#draw-stream').innerHTML = 'new-platform-options';
+  h.calls[0].resolve({ streams: [{ id: 'old-chat', name: '旧平台会话' }] }); await flush();
+  assert.equal(h.get('#draw-stream').innerHTML, 'new-platform-options');
+  h.get('#load-streams').onclick({ currentTarget: h.get('#load-streams') }); await flush();
+  h.get('#draw-form').isConnected = false;
+  h.calls[1].resolve({ streams: [{ id: 'late-chat', name: '已离开页面' }] }); await flush();
+  assert.equal(h.get('#draw-stream').innerHTML, 'new-platform-options');
+});
+
 test('studio FIFO: late A receipt cannot clear queued B key; lost receipt reuses exact snapshot after rebuild', async () => {
   const h = fifoController();
   await h.U.views.studio();
@@ -619,7 +854,7 @@ test('bootstrap: pending transaction/runtime notices survive read refresh until 
   response = { config_update_pending: true, runtime_refresh_pending: true };
   await bootstrap();
   assert.equal(get('#load-error').hidden, false);
-  assert.match(get('#load-error').textContent, /提交与运行配置刷新尚未确认完成/);
+  assert.match(get('#load-error').textContent, /设置仍在生效中/);
   await bootstrap(); // The toolbar refresh uses this same production function.
   assert.equal(get('#load-error').hidden, false);
   response = { config_update_pending: false, runtime_refresh_pending: true };
@@ -721,4 +956,19 @@ test('knowledge: a response after navigating away does not render', async () => 
   h.U.state.view = 'tasks';
   h.calls[0].resolve(knowledgeList()); await opening;
   assert.equal(h.get('#workspace-content').innerHTML, '');
+});
+test('page render uses the shared motion component without an undeclared UI alias', async () => {
+  const app = read('app.js');
+  const source = app.slice(app.indexOf('  async function render()'), app.indexOf('  function updateNavigationIndicator()'));
+  const nodes = new Map(), events = [];
+  const get = key => { if (!nodes.has(key)) nodes.set(key, {}); return nodes.get(key); };
+  const state = { view: 'tasks', dirty: false };
+  const motion = { loading: (node, pending) => events.push(pending), enter: () => events.push('enter') };
+  const render = new Function('state', '$', 'titles', 'document', 'views', 'updateNavigationIndicator', 'window', source + ';return render;')(
+    state, get, { tasks: '绘图任务' }, { querySelectorAll: () => [] },
+    { tasks: async () => events.push('rendered') }, () => {}, { DrawpicUI: { motion } },
+  );
+  await render();
+  assert.equal(get('#page-title').textContent, '绘图任务');
+  assert.deepEqual(events, [true, 'rendered', 'enter', false]);
 });

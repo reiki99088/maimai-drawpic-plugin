@@ -12,12 +12,15 @@ from .common import (
     ProxyConfig as ProxyConfig,
 )
 from .styles import StyleConfig as StyleConfig, StylePresetConfig as StylePresetConfig
+from .styles import ReferenceBindingConfig
+from .references import ReferenceConfig
 from .platforms.openai import (
     OpenAICompatibleInstanceConfig as OpenAICompatibleInstanceConfig,
     OpenAIModelConfig as OpenAIModelConfig,
 )
 from .platforms.google import GoogleModelConfig as GoogleModelConfig
 from .platforms.zhipu import ZhipuModelConfig as ZhipuModelConfig
+from .platforms.minimax import MiniMaxModelConfig as MiniMaxModelConfig
 from .platforms.aliyun import AliyunModelConfig as AliyunModelConfig
 from .platforms.volcengine import VolcengineModelConfig as VolcengineModelConfig
 from .platforms.siliconflow import SiliconFlowModelConfig as SiliconFlowModelConfig
@@ -55,6 +58,7 @@ class DrawpicConfig(PluginConfigBase):
     openai: OpenAIModelConfig = Field(default_factory=OpenAIModelConfig)
     google: GoogleModelConfig = Field(default_factory=GoogleModelConfig)
     zhipu: ZhipuModelConfig = Field(default_factory=ZhipuModelConfig)
+    minimax: MiniMaxModelConfig = Field(default_factory=MiniMaxModelConfig)
     aliyun: AliyunModelConfig = Field(default_factory=AliyunModelConfig)
     volcengine: VolcengineModelConfig = Field(default_factory=VolcengineModelConfig)
     siliconflow: SiliconFlowModelConfig = Field(default_factory=SiliconFlowModelConfig)
@@ -70,12 +74,15 @@ apply_config_i18n(
         GeneralConfig,
         StylePresetConfig,
         StyleConfig,
+        ReferenceBindingConfig,
+        ReferenceConfig,
         ProxyConfig,
         WorldSearchConfig,
         OpenAICompatibleInstanceConfig,
         OpenAIModelConfig,
         GoogleModelConfig,
         ZhipuModelConfig,
+        MiniMaxModelConfig,
         AliyunModelConfig,
         VolcengineModelConfig,
         SiliconFlowModelConfig,

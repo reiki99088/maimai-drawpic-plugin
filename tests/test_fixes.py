@@ -26,7 +26,7 @@ if _PKG_NAME not in sys.modules:
     _pkg.__path__ = [str(_PLUGIN_DIR)]
     sys.modules[_PKG_NAME] = _pkg
 
-from maimai_drawpic_pkg.src.maimai_drawpic.domain.configuration.models import DrawpicConfig, NovelAIModelConfig, StyleConfig, StylePresetConfig  # noqa: E402
+from maimai_drawpic_pkg.src.maimai_drawpic.domain.configuration.models import DrawpicConfig, GeneralConfig, NovelAIModelConfig, StyleConfig, StylePresetConfig  # noqa: E402
 from maimai_drawpic_pkg.src.maimai_drawpic.infrastructure.http import read_response_bytes, read_response_json  # noqa: E402
 from maimai_drawpic_pkg.src.maimai_drawpic.infrastructure.media.images import detect_image_dimensions, detect_image_format, detect_mime_type  # noqa: E402
 from maimai_drawpic_pkg.src.maimai_drawpic.interfaces.chat.message_images import _SOURCE_IMAGE_CACHE, _SOURCE_IMAGE_CACHE_ORDER, _normalize_stream_ids, _remember_source_image, SourceImageInput, cache_source_image_from_message, collect_command_source_image_inputs, extract_all_image_base64_from_message, extract_source_images_from_message, find_all_cached_source_images, find_all_cached_source_image_inputs, find_source_image_inputs  # noqa: E402
@@ -417,6 +417,33 @@ def test_novelai_mode_and_prompt_merging() -> None:
     print("[OK] NovelAI mode：Furry 数据集标签与正反向提示词独立合并")
 
 
+def test_negative_prompt_deduplication_preserves_weighted_and_escaped_terms() -> None:
+    from maimai_drawpic_pkg.src.maimai_drawpic.domain.styles import deduplicate_negative_prompt
+
+    assert deduplicate_negative_prompt("Blurry，watermark", "blurry; TEXT\nwatermark") == "Blurry, watermark, TEXT"
+    weighted = "1.5::one, two, three::, (hands, fingers:1.2), {{bad anatomy}}"
+    assert deduplicate_negative_prompt(weighted, "two, TWO", weighted) == weighted + ", two"
+    assert deduplicate_negative_prompt(r"tag\,with comma, other", r"tag\,with comma") == r"tag\,with comma, other"
+    assert deduplicate_negative_prompt("trailing\\") == "trailing\\"
+
+
+def test_legacy_inline_options_preserve_json_and_negative_text() -> None:
+    from maimai_drawpic_pkg.src.maimai_drawpic.domain.parameters import parse_key_value_options, split_inline_key_value_options
+
+    values = split_inline_key_value_options(
+        'negative_prompt=don\'t draw hands, blurry; watermark\n'
+        'nested={"text": "a=b,c", "enabled": true}\ncustom_flag=false'
+    )
+    parsed = parse_key_value_options(values)
+    assert parsed["negative_prompt"] == "don't draw hands, blurry; watermark"
+    assert parsed["nested"] == {"text": "a=b,c", "enabled": True}
+    assert parsed["custom_flag"] is False
+    assert split_inline_key_value_options("seed=1, strength=0.5；custom=true") == [
+        "seed=1", "strength=0.5", "custom=true",
+    ]
+    assert split_inline_key_value_options("seed=1，中文参数=值") == ["seed=1", "中文参数=值"]
+
+
 def test_style_prompt_templates_are_platform_independent() -> None:
     """插件风格只渲染通用提示词，不携带任何 NAI mode。"""
 
@@ -441,7 +468,10 @@ def test_style_prompt_templates_are_platform_independent() -> None:
     assert resolved.positive_prompt == "watercolor, a white cat"
     assert resolved.negative_prompt == "oil painting, blurry"
 
-    plain = resolver.resolve(style_name="", user_prompt="plain prompt")
+    automatic = resolver.resolve(style_name="", user_prompt="a white cat", user_negative_prompt="blurry")
+    assert automatic == resolved
+
+    plain = resolver.resolve(style_name="none", user_prompt="plain prompt")
     assert plain.style_name == ""
     assert plain.positive_prompt == "plain prompt"
     assert plain.negative_prompt == ""
@@ -456,7 +486,7 @@ def test_style_descriptions_are_structured_and_backward_compatible() -> None:
 
     legacy_preset = StylePresetConfig(name="旧风格")
     assert legacy_preset.description == ""
-    assert DrawpicConfig().plugin.config_version == "2.44.0"
+    assert DrawpicConfig().plugin.config_version == "2.53.0"
 
     resolver = StylePromptResolver(
         StyleConfig(
@@ -644,7 +674,7 @@ def test_regular_novelai_route_uses_session_settings_and_prompts() -> None:
         n=1,
     )
     assert payload["input"] == "artist:session, default positive, user positive"
-    assert payload["parameters"]["negative_prompt"] == "default negative, user negative"
+    assert payload["parameters"]["negative_prompt"] == "user negative, default negative"
     assert provider.img2img_strength == 0.72
     assert provider.img2img_noise == 0.18
     print("[OK] 普通 NAI 路由：mode、画师标签、平台参数和正反向提示词保持一致")
@@ -741,7 +771,10 @@ def test_background_tasks_are_concurrent_and_user_isolated() -> None:
         def __init__(self, provider: _ConcurrentProvider) -> None:
             self.provider = provider
             self.config = types.SimpleNamespace(
-                general=types.SimpleNamespace(fallback_model="", fallback_models=[], request_retry_count=0)
+                general=types.SimpleNamespace(
+                    fallback_model="", fallback_models=[], request_retry_count=0,
+                    sync_generated_images_to_history=False,
+                )
             )
 
         @staticmethod
@@ -785,6 +818,14 @@ def test_background_tasks_are_concurrent_and_user_isolated() -> None:
         @staticmethod
         def resolve_request_timeout_seconds() -> int:
             return 10
+
+        @staticmethod
+        def get_negative_prompt_config(model: str):
+            return types.SimpleNamespace(negative_prompt_enabled=True)
+
+        @staticmethod
+        def resolve_negative_prompt(model: str, request_negative_prompt: str, task_type: str) -> str:
+            return request_negative_prompt
 
         @staticmethod
         def supports_separate_negative_prompt(model: str, task_type: str) -> bool:
@@ -1184,6 +1225,10 @@ def test_provider_router_openai_routes_cache() -> None:
             enabled = False
             models: list[str] = []
 
+        class minimax:
+            enabled = False
+            models: list[str] = []
+
         class volcengine:
             enabled = False
             models: list[str] = []
@@ -1264,6 +1309,10 @@ def test_provider_router_fallback_model_resolution() -> None:
             enabled = False
             models: list[str] = []
 
+        class minimax:
+            enabled = False
+            models: list[str] = []
+
         class volcengine:
             enabled = False
             models: list[str] = []
@@ -1321,6 +1370,14 @@ def test_style_negative_prompt_routing() -> None:
             self.supports_negative = supports_negative
             self.provider = _Provider()
             self.received_negative = ""
+
+        @staticmethod
+        def get_negative_prompt_config(model: str):
+            return types.SimpleNamespace(negative_prompt_enabled=True)
+
+        @staticmethod
+        def resolve_negative_prompt(model: str, request_negative_prompt: str, task_type: str) -> str:
+            return request_negative_prompt
 
         def supports_separate_negative_prompt(self, model: str, task_type: str) -> bool:
             del model, task_type
@@ -1435,7 +1492,7 @@ def _build_context_test_plugin():
     plugin = object.__new__(_ContextTestPlugin)
     plugin._test_ctx = types.SimpleNamespace(logger=_FakeLogger())
     plugin._test_config = types.SimpleNamespace(
-        general=types.SimpleNamespace(
+        general=GeneralConfig(
             failure_reason_enabled=True,
             permission_enabled=False,
             group_quota_enabled=False,

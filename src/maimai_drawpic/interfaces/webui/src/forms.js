@@ -7,13 +7,22 @@
     const language = window.maibot?.context?.language?.replace("-", "_");
     return meta.i18n?.[language]?.[key] || meta[key] || "";
   }
+  function defaultValue(key, meta) {
+    return key === "api_key" || key === "password" || meta.input_type === "password" ? "" : structuredClone(meta.default);
+  }
+  function multiline(key, meta) {
+    return meta.input_type === "textarea" ||
+      (/prompt|description|artist|extra_parameters|instructions/.test(key) && !/(node_id|input_name)$/.test(key));
+  }
   function scalar(key, meta, value, id, values = {}) {
     const type = meta.type;
-    if (key === "default_style") {
+    if (key === "asset_id")
+      return `<select id="${id}" data-input="${e(key)}" data-reference-picker="preset">${U.referenceUI.options("preset", value)}</select>`;
+    if (key === "default_style" || key === "default_image_edit_preset") {
       const presets = (values.presets || []).filter(
-        (item) => item.enabled && item.name.trim(),
+        (item) => item.enabled && item.name.trim() && item.preset_type === (key === "default_style" ? "text_to_image" : "image_to_image"),
       );
-      return `<select id="${id}" data-input="${e(key)}"><option value="">不使用默认风格</option>${value && !presets.some((item) => item.name === value) ? `<option value="${e(value)}" selected>${e(value)}（未启用或不存在）</option>` : ""}${presets.map((item) => `<option value="${e(item.name)}" ${item.name === value ? "selected" : ""}>${e(item.name)}</option>`).join("")}</select>`;
+      return `<select id="${id}" data-input="${e(key)}"><option value="">不使用默认预设</option>${value && !presets.some((item) => item.name === value) ? `<option value="${e(value)}" selected>${e(value)}（未启用或不存在）</option>` : ""}${presets.map((item) => `<option value="${e(item.name)}" ${item.name === value ? "selected" : ""}>${e(item.name)}</option>`).join("")}</select>`;
     }
 
     if (key === "default_model") {
@@ -36,11 +45,12 @@
       const selected = meta.multiple ? new Set(value || []) : new Set([value]);
       return `<select id="${id}" data-input="${e(key)}">${!meta.choices?.includes(value) ? `<option value="${e(value)}">${e(value) || "使用默认值"}</option>` : ""}${(meta.choices || []).map((item) => `<option value="${e(item)}" ${selected.has(item) ? "selected" : ""}>${e(U.formOptions.label(item))}</option>`).join("")}</select>`;
     }
+    if (type === "integer" && (Number(meta.max) > Number.MAX_SAFE_INTEGER || Number(meta.min) < Number.MIN_SAFE_INTEGER || !Number.isSafeInteger(Number(value))))
+      return `<input id="${id}" type="text" inputmode="numeric" pattern="-?[0-9]+" data-exact-integer data-input="${e(key)}" value="${e(value)}" required autocomplete="off">`;
     if (type === "integer" || type === "number")
       return `<input id="${id}" type="number" data-input="${e(key)}" value="${e(value)}" step="${meta.step || (type === "integer" ? 1 : "any")}" ${meta.min != null ? `min="${e(meta.min)}"` : ""} ${meta.max != null ? `max="${e(meta.max)}"` : ""}>`;
-    const secret = key === "api_key" || key === "password";
-    const multiline = /prompt|description|artist|extra_parameters|instructions/.test(key);
-    if (multiline && !secret)
+    const secret = key === "api_key" || key === "password" || meta.input_type === "password";
+    if (multiline(key, meta) && !secret)
       return `<textarea id="${id}" rows="${meta.rows || 3}" data-input="${e(key)}" maxlength="16000">${e(value)}</textarea>`;
     const models = /^(default_model|fallback_model)$/.test(key);
     return `<input id="${id}" type="${secret ? "password" : "text"}" data-input="${e(key)}" value="${e(value)}" autocomplete="${secret ? "new-password" : "off"}" ${models ? 'list="workspace-models"' : ""} placeholder="${secret ? "留空保留已配置的密钥" : e(localized(meta, "placeholder"))}">`;
@@ -73,7 +83,7 @@
             !(options.platform && key === "instances"),
         )
         .map(([key, meta]) => {
-          const value = values[key] ?? structuredClone(meta.default);
+          const value = values[key] ?? defaultValue(key, meta);
           const id = `field-${++sequence}`;
           const hint = [
               meta.multiple
@@ -101,11 +111,17 @@
             meta.type === "array" ||
             meta.type === "boolean" ||
             meta.multiple ||
-            /prompt|description/.test(key);
+            multiline(key, meta);
           const array = meta.type === "array",
             tag = array || meta.multiple ? "fieldset" : "div",
             label = e(localized(meta, "label") || key);
-          return `<${tag} class="field ${meta.type === "boolean" ? "field-toggle" : ""} ${full ? "full" : ""}" data-field="${e(key)}"${tag === "fieldset" ? description : ""}>${tag === "fieldset" ? `<legend>${label}</legend>` : `<label for="${id}">${label}</label>`}${control}${hint ? `<p id="${id}-hint" class="hint">${e(hint)}</p>` : ""}</${tag}>`;
+          const reset = Object.hasOwn(meta, "default")
+            ? `<button type="button" class="icon-button field-reset" data-reset-field title="恢复默认值" aria-label="恢复${label}的默认值" hidden>${icon("reset")}</button>`
+            : "";
+          const heading = tag === "fieldset"
+            ? `<legend class="field-heading">${label}</legend>`
+            : `<div class="field-heading"><label for="${id}">${label}</label></div>`;
+          return `<${tag} class="field ${meta.type === "boolean" ? "field-toggle" : ""} ${full ? "full" : ""}" data-field="${e(key)}"${tag === "fieldset" ? description : ""}>${heading}<div class="field-controls"><div class="field-control-value">${control}</div>${reset}</div>${hint ? `<p id="${id}-hint" class="hint">${e(hint)}</p>` : ""}</${tag}>`;
         })
         .join("") +
       "</div>"
@@ -113,15 +129,18 @@
   }
   function read(fields, values, root, options = {}) {
     const result = structuredClone(values);
+    // 布局容器不影响字段归属；嵌套对象的字段由对应对象递归读取。
+    const ownedFields = new Map([...root.querySelectorAll("[data-field]")]
+      .filter(field => !root.contains(field.parentElement.closest("[data-field]")))
+      .map(field => [field.dataset.field, field]));
     for (const [key, meta] of Object.entries(fields)) {
-      if (key === "config_version" || (options.platform && key === "instances"))
+      if (meta.hidden || key === "config_version" || (options.platform && key === "instances"))
         continue;
-      const field = Array.from(
-        root.querySelectorAll(":scope > .form-grid > [data-field]"),
-      ).find((n) => n.dataset.field === key);
-      if (!field) continue;
-      const multiple = $(":scope > [data-multiple]", field),
-        control = $(":scope > [data-control]", field);
+      const field = ownedFields.get(key);
+      if (!field) throw new Error(`未找到「${localized(meta, "label") || key}」设置项，请刷新页面后重试`);
+      const controls = $(":scope > .field-controls > .field-control-value", field);
+      const multiple = $(":scope > [data-multiple]", controls),
+        control = $(":scope > [data-control]", controls);
       if (multiple)
         result[key] = [...multiple.querySelectorAll("input:checked")].map(
           (input) => input.value,
@@ -152,7 +171,14 @@
         else if (meta.type === "integer" || meta.type === "number") {
           if (!input.value.trim())
             throw new Error(`${localized(meta, "label")}不能为空`);
-          result[key] = Number(input.value);
+          if (input.hasAttribute("data-exact-integer")) {
+            const text = input.value.trim();
+            if (!/^-?[0-9]+$/.test(text)) throw new Error(`${localized(meta, "label")}必须是十进制整数`);
+            const value = BigInt(text);
+            if ((meta.min != null && value < BigInt(meta.min)) || (meta.max != null && value > BigInt(meta.max)))
+              throw new Error(`${localized(meta, "label")}超出允许范围`);
+            result[key] = value >= BigInt(Number.MIN_SAFE_INTEGER) && value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : value.toString();
+          } else result[key] = Number(input.value);
         } else if (meta.multiple)
           result[key] = Array.from(input.selectedOptions, (n) => n.value);
         else result[key] = input.value;
@@ -161,32 +187,113 @@
     return result;
   }
   function refreshStyleChoices(root) {
-    const select = $('[data-input="default_style"]', root);
     const list = $('[data-array="presets"]', root);
-    if (!select || !list) return;
-    const selected = select.value;
-    const names = Array.from(list.children)
-      .filter((node) => node.hasAttribute("data-array-object"))
-      .map((node) => ({
-        name: $('[data-input="name"]', node)?.value.trim() || "",
-        enabled: $('[data-input="enabled"]', node)?.checked,
-      }))
-      .filter((item) => item.enabled && item.name);
-    select.innerHTML =
-      '<option value="">不使用默认风格</option>' +
-      names
-        .map(
-          (item) =>
-            `<option value="${e(item.name)}" ${item.name === selected ? "selected" : ""}>${e(item.name)}</option>`,
-        )
-        .join("");
-    if (!names.some((item) => item.name === selected)) select.value = "";
+    if (!list) return;
+    for (const [key, kind] of [["default_style", "text_to_image"], ["default_image_edit_preset", "image_to_image"]]) {
+      const select = $(`[data-input="${key}"]`, root);
+      if (!select) continue;
+      const selected = select.value;
+      const names = [...list.children].filter(node => node.hasAttribute("data-array-object"))
+        .filter(node => $('[data-input="enabled"]', node)?.checked && $('[data-input="preset_type"]', node)?.value === kind)
+        .map(node => $('[data-input="name"]', node)?.value.trim()).filter(Boolean);
+      select.innerHTML = '<option value="">不使用默认预设</option>' +
+        (selected && !names.includes(selected) ? `<option value="${e(selected)}" selected>${e(selected)}（未启用或不存在）</option>` : "") +
+        names.map(name => `<option value="${e(name)}" ${name === selected ? "selected" : ""}>${e(name)}</option>`).join("");
+    }
+  }
+  function fieldMeta(field, root, fields) {
+    // 按嵌套路径找到字段定义，无需解析其他尚未填写完整的草稿。
+    const path = [];
+    for (let node = field; node && root.contains(node); node = node.parentElement?.closest("[data-field]"))
+      path.unshift(node.dataset.field);
+    let schema = fields, meta;
+    for (const key of path) {
+      meta = schema[key];
+      schema = meta.item_fields;
+    }
+    return meta;
+  }
+  function fieldSignature(field) {
+    // 比较实际编辑控件，允许未填完整的草稿，忽略未启用的自定义输入和未选中的多选项。
+    return JSON.stringify([...field.querySelectorAll("input,select,textarea,button[aria-pressed=true]")]
+      .filter(node => !node.disabled && !(node.hasAttribute("data-choice-value") && !node.checked))
+      .map(node => [node.tagName, node.type,
+        node.type === "checkbox" ? [node.value, node.checked]
+          : node.type === "button" ? true
+          : node.type === "number" && node.value !== "" && Number.isFinite(node.valueAsNumber)
+            ? node.valueAsNumber : node.value]));
+  }
+  function resetField(field, root, fields, options) {
+    const meta = fieldMeta(field, root, fields);
+    const key = field.dataset.field, value = defaultValue(key, meta);
+    const controls = $(":scope > .field-controls > .field-control-value", field);
+    const component = $(":scope > [data-array], :scope > [data-control], :scope > [data-multiple]", controls);
+    if (component) {
+      const template = document.createElement("template");
+      template.innerHTML = fieldsHTML({ [key]: meta }, { [key]: value }, options);
+      const replacement = template.content.querySelector("[data-array], [data-control], [data-multiple]");
+      // 数组保留字段外壳和模型工具栏；复合控件保留标签与说明的关联。
+      if (!component.hasAttribute("data-array")) {
+        const previous = component.id ? component : component.querySelector("[id]");
+        const next = replacement.id ? replacement : replacement.querySelector("[id]");
+        next.id = previous.id;
+        if (previous.hasAttribute("aria-describedby"))
+          next.setAttribute("aria-describedby", previous.getAttribute("aria-describedby"));
+        else next.removeAttribute("aria-describedby");
+      }
+      component.replaceWith(replacement);
+    } else {
+      const input = $("[data-input]", field);
+      if (meta.type === "boolean") input.checked = value;
+      else input.value = value ?? "";
+      input.setCustomValidity("");
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    field.dispatchEvent(new CustomEvent("fieldreset", { bubbles: true, detail: { key } }));
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    refreshStyleChoices(root);
+    U.formCollections.refresh(root);
+    U.selects.refresh(field);
+    field.querySelector(".select-trigger,input:not([hidden]),textarea,[data-add-array]")?.focus({ preventScroll: true });
+    U.toast(`已恢复「${localized(meta, "label") || key}」默认值，保存后生效`);
   }
   function bind(root, fields, values, options = {}) {
     U.formControls.bind(root);
     U.formCollections.bind(root);
-    root.addEventListener("input", () => refreshStyleChoices(root));
+    const defaultSignatures = new WeakMap();
+    const refreshResets = () => {
+      for (const button of root.querySelectorAll("[data-reset-field]")) {
+        const field = button.closest("[data-field]");
+        if (!defaultSignatures.has(field)) {
+          const meta = fieldMeta(field, root, fields), key = field.dataset.field;
+          const template = document.createElement("template");
+          template.innerHTML = fieldsHTML({ [key]: meta }, { [key]: defaultValue(key, meta) }, options);
+          defaultSignatures.set(field, fieldSignature(template.content.querySelector("[data-field]")));
+        }
+        button.hidden = fieldSignature(field) === defaultSignatures.get(field);
+      }
+    };
+    const negativeToggle = $('[data-input="negative_prompt_enabled"]', root);
+    const negativeDefault = $('[data-field="negative_prompt"]', root);
+    if (negativeToggle && negativeDefault) {
+      const refreshNegativeDefault = () => {
+        negativeDefault.hidden = !negativeToggle.checked;
+      };
+      negativeToggle.addEventListener("change", refreshNegativeDefault);
+      refreshNegativeDefault();
+    }
+    root.addEventListener("input", () => {
+      refreshStyleChoices(root);
+      refreshResets();
+    });
+    root.addEventListener("change", refreshResets);
+    refreshResets();
     root.onclick = (event) => {
+      const reset = event.target.closest("[data-reset-field]");
+      if (reset) {
+        resetField(reset.closest("[data-field]"), root, fields, options);
+        return;
+      }
       const move = event.target.closest("[data-move]");
       if (move) {
         const item = move.closest("[data-array-row]");
@@ -201,6 +308,7 @@
           state.dirty = true;
           const notice = $("[data-unsaved]", root);
           if (notice) notice.hidden = false;
+          refreshResets();
         }
         return;
       }
@@ -212,6 +320,7 @@
         state.dirty = true;
         const notice = $("[data-unsaved]", root);
         if (notice) notice.hidden = false;
+        refreshResets();
         return;
       }
       const add = event.target.closest("[data-add-array]");
@@ -248,8 +357,9 @@
       state.dirty = true;
       const notice = $("[data-unsaved]", root);
       if (notice) notice.hidden = false;
+      refreshResets();
     };
-    U.bindDirty(root);
+    if (options.trackDirty !== false) U.bindDirty(root);
     return () => read(fields, values, root, options);
   }
   function appendArray(root, key, values, options = {}) {
@@ -259,5 +369,11 @@
     U.formCollections.refresh(root);
     array.dispatchEvent(new Event("input", { bubbles: true }));
   }
-  U.forms = { html: fieldsHTML, bind, read, appendArray };
+  function sections(groups, fields, values, options = {}) {
+    return groups.map(group => {
+      const selected = Object.fromEntries(Object.entries(fields).filter(([key]) => group.includes(key)));
+      return `<details class="form-section" ${group.open ? "open" : ""}><summary>${e(group.title)}${icon("chevron")}</summary>${fieldsHTML(selected, values, options)}</details>`;
+    }).join("");
+  }
+  U.forms = { html: fieldsHTML, sections, bind, read, appendArray };
 })();
