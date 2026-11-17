@@ -19,6 +19,9 @@ AccessListMode = Literal["blacklist", "whitelist"]
 
 ReviewModelTask = Literal["replyer", "planner", "vlm"]
 
+# 世界知识识别与整理词条只处理文字；思考模型会把输出预算花在思考上，所以多给两个常配非思考模型的任务组
+WorldModelTask = Literal["replyer", "planner", "vlm", "utils", "fast_model"]
+
 ProxyScheme = Literal["http", "https"]
 
 CommandReplyMode = Literal["图片", "文本"]

@@ -90,6 +90,15 @@ def make_service(tmp_path, *, llm=None, web=None, config=None, finder=None):
     return service, ctx, store
 
 
+@pytest.mark.parametrize("task", ["replyer", "planner", "vlm", "utils", "fast_model"])
+def test_world_model_accepts_non_thinking_host_tasks(task) -> None:
+    config = DrawpicConfig()
+    config.general = type(config.general).model_validate({**config.general.model_dump(), "world_knowledge_model": task})
+    assert config.general.world_knowledge_model == task
+    with pytest.raises(Exception):
+        type(config.general).model_validate({**config.general.model_dump(), "world_knowledge_model": "deepseek-flash"})
+
+
 def test_parsers_are_strict_and_tolerant() -> None:
     mentions = prompts.parse_entities(
         "1. 芙宁娜|game_character|原神|水神;Furina|芙宁娜 立绘\n乱写的一行\nT1|esports_team||SKT|\n芙宁娜|other", 3,

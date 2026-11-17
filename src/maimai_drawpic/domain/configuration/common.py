@@ -4,7 +4,7 @@ from maibot_sdk import Field, PluginConfigBase
 from pydantic import field_validator
 from typing import List
 
-from .types import AccessListMode, CommandReplyMode, ProxyScheme, QuotaPeriodMode, ReviewModelTask
+from .types import AccessListMode, CommandReplyMode, ProxyScheme, QuotaPeriodMode, ReviewModelTask, WorldModelTask
 from .references import ReferenceConfig
 
 
@@ -431,12 +431,12 @@ class GeneralConfig(PluginConfigBase):
             "order": 17,
         },
     )
-    world_knowledge_model: ReviewModelTask = Field(
+    world_knowledge_model: WorldModelTask = Field(
         default="planner",
         description="识别现实对象与整理词条使用的宿主模型任务",
         json_schema_extra={
             "label": "世界知识模型",
-            "hint": "默认 planner；沿用 MaiBot 中对应任务组的模型配置，可选 replyer、planner 或 vlm。",
+            "hint": "默认 planner；沿用 MaiBot 中对应任务组的模型配置，可选 replyer、planner、vlm、utils 或 fast_model。宿主是思考模型时建议选配了非思考模型的任务组（多为 fast_model）。",
             "order": 17.1,
         },
     )

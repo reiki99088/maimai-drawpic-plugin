@@ -549,9 +549,9 @@ _FIELD_HINT_OVERRIDES: Dict[str, Tuple[str, str, str]] = {
         "웹 검색으로 찾아 외형 설명과 참고 이미지를 이미지 모델에 전달합니다. Host 웹 검색 설정이 필요합니다. 실패해도 원래 프롬프트로 계속합니다.",
     ),
     "GeneralConfig.world_knowledge_model": (
-        "Default: planner. Uses the models configured for the Host replyer, planner or vlm task group.",
-        "既定は planner。Host の replyer、planner、vlm タスクグループに設定されたモデルを使用します。",
-        "기본값은 planner입니다. Host의 replyer, planner 또는 vlm 작업 그룹에 설정된 모델을 사용합니다.",
+        "Default: planner. Uses the models configured for the Host replyer, planner, vlm, utils or fast_model task group; a non-thinking model (often fast_model) is recommended.",
+        "既定は planner。Host の replyer、planner、vlm、utils、fast_model タスクグループに設定されたモデルを使用します。思考しないモデル（多くは fast_model）を推奨します。",
+        "기본값은 planner입니다. Host의 replyer, planner, vlm, utils 또는 fast_model 작업 그룹에 설정된 모델을 사용합니다. 사고하지 않는 모델(보통 fast_model)을 권장합니다.",
     ),
     "GeneralConfig.world_knowledge_timeout_seconds": (
         "Default: 60 seconds, range 5–600. On timeout, drawing continues with the entries found so far; the task never fails because of it.",

@@ -250,7 +250,7 @@ NovelAI 实例支持 `v4_negative_prompt.caption.char_captions` 多角色反向�
 - `prompt_review_timeout_seconds`、`image_review_timeout_seconds`：分别控制两类审核单次尝试的最长等待时间，单位秒，均默认 60，范围 5～600；与图片生成超时独立，审核提前完成即继续。
 - `prompt_review_retry_count`、`image_review_retry_count`：分别控制两类审核失败后额外重试的次数，默认 2，范围 0～5；0 表示关闭。明确拒绝或取消不重试，图片审核重试不重新生图。
 - `world_knowledge_enabled`：世界知识总开关，默认 `false`。开启后群聊画图、工作台与插件 API 都会先识别画面里的现实对象并补充外观描述与参考图；v2 提交和工作台可按单次请求覆盖。需要宿主开启联网检索，否则只使用已有词条。词条与参考图在工作台「世界知识」页管理，不必手改 `world_knowledge/entries.json`。
-- `world_knowledge_model`：识别对象与整理词条使用的宿主任务组，默认 `planner`。`world_knowledge_timeout_seconds` 为画前检索的总时限，默认 60 秒，范围 5～600，超时用已拿到的词条继续绘图。
+- `world_knowledge_model`：识别对象与整理词条使用的宿主任务组，默认 `planner`，可选 `replyer`、`planner`、`vlm`、`utils`、`fast_model`；宿主模型是思考模型时，思考过程会吃掉输出预算，建议选配了非思考模型的 `fast_model` 或 `utils`。`world_knowledge_timeout_seconds` 为画前检索的总时限，默认 60 秒，范围 5～600，超时用已拿到的词条继续绘图。
 - `world_knowledge_max_entities`（默认 3，0～5）、`world_knowledge_max_searches`（默认 4，0～8）、`world_knowledge_max_reference_images`（默认 2，0～2）：每次最多识别的对象数、联网检索次数和附加的参考图张数；对象数为 0 时只匹配手工词条。词条参考图排在自带图、自我参考、预设和素材之后，只占合计 8 张、40 MiB 的剩余位置；素材已覆盖的对象不重复加图；文生图请求只注入文字。
 - `world_knowledge_auto_images`：自动为查到的对象找参考图，默认 `true`；先查 Data Dragon（英雄联盟英雄）与维基类站点的页面主图，找不到再用下文的网搜取图；选手、公众人物不自动取图。`world_knowledge_screen_images` 用视觉模型筛一遍候选图，默认 `false`。`world_knowledge_allow_fake_ip` 只为检索与取图放行代理 TUN fake-ip 段，默认 `false`。
 - `world_knowledge_verify_enabled`：画后校验，默认 `false`；`world_knowledge_verify_model` 默认 `vlm`，必须支持图片输入。`world_knowledge_redraw_enabled` 默认 `true`，校验判为严重画错时重画一次，任务耗时约翻倍，不额外扣次数。
