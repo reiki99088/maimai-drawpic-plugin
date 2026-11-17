@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from typing import List, Literal
+from typing import List, Literal, Tuple
 import unicodedata
 
 
@@ -63,4 +63,5 @@ class PreparedRequest:
     task_type: str
     style: str
     strict_reference_inputs: bool = False
+    materials: Tuple[ReferenceImage, ...] = ()  # 按点名对象识别出的素材（含主体名），供画后校验
 

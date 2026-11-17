@@ -1,7 +1,7 @@
 """在一个既有后台任务内完成固定的素材准备与预设应用。"""
 
 from hashlib import sha256
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 import asyncio
 
 from ...domain.references import PreparedRequest, ReferenceImage, ReferenceOptions, normalize_tag
@@ -48,8 +48,10 @@ class ReferencePreparation:
                                              image.asset_id, image.version, merge_prompt_parts((image.note, binding.note))))
         return images
 
-    async def prepare(self, task_id: str) -> PreparedRequest:
+    async def prepare(self, task_id: str,
+                      world_materials: Optional[Callable[[Any], Awaitable[List[ReferenceImage]]]] = None) -> PreparedRequest:
         # 配置仅允许收紧在途请求；任务使用已读取的资产和模板版本。
+        # world_materials：世界知识词条库，点名对象在网搜前先用词条图当候选（仍需识别确认）。
         refs = self.config.general.references
         live = self.get_config() if self.get_config is not None else self.config
         if self.options.self_reference == "required" and not live.general.references.self_reference_enabled:
@@ -61,6 +63,7 @@ class ReferencePreparation:
             if not enabled:
                 raise TaskRequestError("MATERIAL_SOURCE_DISABLED", f"素材来源已关闭：{source}")
         images = list(self.images)
+        materials: List[ReferenceImage] = []  # 按点名对象识别出的素材，画后校验用
         images.extend(self.frozen[identifier] for identifier in self.options.reference_ids)
         if refs.self_reference_enabled and self.options.self_reference != "off":
             subject = "self" if self.options.self_reference == "required" else await self.recognizer.self_subject(
@@ -111,7 +114,17 @@ class ReferencePreparation:
                     continue
                 found = False
                 candidates = list(images)
-                for source in ("existing", "web"):
+                for source in ("existing", "world", "web"):
+                    if source == "world":
+                        if world_materials is None or need.kind == "user" or not need.web_search:
+                            continue
+                        try:
+                            candidates = await world_materials(need)
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception as exc:  # 词条库只是网搜前的捷径，读不到就照常网搜
+                            self.ctx.logger.warning("词条库素材读取失败: task_id=%s error_type=%s", task_id, type(exc).__name__)
+                            continue
                     if source == "web":
                         if "web" not in self.options.material_sources or not need.web_search:
                             continue
@@ -130,6 +143,7 @@ class ReferencePreparation:
                         if await self.recognizer.matches(candidate, need):
                             # 同一真实图片可承担多个用途，最终仅发送一次。
                             images.append(ReferenceImage(candidate.raw, candidate.source, need.role, need.subject, candidate.url))
+                            materials.append(images[-1])
                             found = True
                             break
                     if found:
@@ -177,7 +191,7 @@ class ReferencePreparation:
                              task_id, mode, len(unique), resolved.style_name)
         return PreparedRequest(prompt, resolved.negative_prompt_template, [image.raw for image in unique.values()],
                                [image.url for image in unique.values()], mode, resolved.style_name,
-                               len(unique) > 1 and bool(sources - {"input"}))
+                               len(unique) > 1 and bool(sources - {"input"}), tuple(materials))
 
 
 async def freeze_reference_request(*, ctx: Any, config: Any, store: ReferenceAssetStore, streams: Any,

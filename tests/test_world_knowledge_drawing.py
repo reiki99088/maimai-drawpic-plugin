@@ -155,22 +155,30 @@ def test_reference_slots_follow_model_limits(make_plugin, monkeypatch, tmp_path)
     asyncio.run(run())
 
 
-def test_world_images_only_when_request_allows_added_images(make_plugin, monkeypatch, tmp_path):
-    """与原版素材识别互斥：要求文生图或本次开了网络素材搜索时只注入文字；图片计入 8 张上限。"""
-    from types import SimpleNamespace
+class StubPreparation:
+    """模拟原版素材准备：记录收到的词条库候选，按给定素材返回。"""
+
+    def __init__(self, required_mode, sources, images, materials=()):
+        from types import SimpleNamespace
+        self.required_mode = required_mode
+        self.options = SimpleNamespace(material_sources=sources)
+        self.images = images
+        self.expected_mode = required_mode
+        self.materials = materials
+        self.finder = None
+
+    async def prepare(self, task_id, world_materials=None):
+        self.finder = world_materials
+        PreparedRequest = module("domain.references").PreparedRequest
+        mode = "edit_image" if self.images else "draw"
+        return PreparedRequest("画芙宁娜", "", list(self.images), [""] * len(self.images), mode, "", False,
+                               tuple(self.materials))
+
+
+def test_world_images_join_reference_budget_instead_of_excluding_web_materials(make_plugin, monkeypatch, tmp_path):
+    """要求文生图时只注入文字；开了网络素材也照常补位，只跳过素材已覆盖的对象；合计不超过 8 张。"""
     from test_workspace import image_bytes
-    PreparedRequest = module("domain.references").PreparedRequest
-
-    class Preparation:
-        def __init__(self, required_mode, sources, images):
-            self.required_mode = required_mode
-            self.options = SimpleNamespace(material_sources=sources)
-            self.images = images
-            self.expected_mode = required_mode
-
-        async def prepare(self, task_id):
-            mode = "edit_image" if self.images else "draw"
-            return PreparedRequest("画芙宁娜", "", list(self.images), [""] * len(self.images), mode, "", False)
+    ReferenceImage = module("domain.references").ReferenceImage
 
     async def run():
         plugin = make_plugin(False)
@@ -183,19 +191,70 @@ def test_world_images_only_when_request_allows_added_images(make_plugin, monkeyp
             calls = capture_attempts(service, monkeypatch)
             source = image_bytes()
 
-            await draw(plugin, service, "画芙宁娜", reference_preparation=Preparation("", [], []))
+            auto = StubPreparation("", [], [])
+            await draw(plugin, service, "画芙宁娜", reference_preparation=auto)
             assert (calls[-1]["task_type"], calls[-1]["sources"]) == ("edit_image", 1)  # 自动模式可加图
-            await draw(plugin, service, "画芙宁娜", reference_preparation=Preparation("draw", [], []))
+            assert auto.finder is not None  # 世界知识开启时素材准备拿到词条库候选
+            await draw(plugin, service, "画芙宁娜", reference_preparation=StubPreparation("draw", [], []))
             assert (calls[-1]["task_type"], calls[-1]["sources"]) == ("draw", 0)
             assert "[World references" in calls[-1]["prompt"] and "Image 1" not in calls[-1]["prompt"]
-            await draw(plugin, service, "画芙宁娜", reference_preparation=Preparation("", ["web"], [source]))
+            # 开了网络素材不再互斥：词条图接在素材后面
+            await draw(plugin, service, "画芙宁娜", reference_preparation=StubPreparation("", ["web"], [source]))
+            assert (calls[-1]["task_type"], calls[-1]["sources"]) == ("edit_image", 2)
+            assert "Image 2 is the official design of 芙宁娜" in calls[-1]["prompt"]
+            # 素材已经按点名找到了芙宁娜：只注入文字，不重复加图
+            covered = StubPreparation("", ["web"], [source], [ReferenceImage(source, "web", "identity", "芙宁娜")])
+            receipt = await draw(plugin, service, "画芙宁娜", reference_preparation=covered)
             assert (calls[-1]["task_type"], calls[-1]["sources"]) == ("edit_image", 1)
             assert "[World references" in calls[-1]["prompt"] and "Image 2" not in calls[-1]["prompt"]
-            await draw(plugin, service, "画芙宁娜", reference_preparation=Preparation("edit_image", ["chat"], [source]))
-            assert (calls[-1]["task_type"], calls[-1]["sources"]) == ("edit_image", 2)
+            record = plugin._task_store.get_task(receipt["task_id"]).world_knowledge
+            assert record["material_subjects"] == ["芙宁娜"] and record["reference_images_sent"] == 0
+
+            world.config.general.world_knowledge_enabled = False
+            off = StubPreparation("", ["web"], [source])
+            await draw(plugin, service, "画芙宁娜", reference_preparation=off)
+            assert off.finder is None and calls[-1]["prompt"] == "画芙宁娜"
 
             assert service.world_reference_slots("Primary/primary-image", 7, None) == 1
             assert service.world_reference_slots("Primary/primary-image", 8, None) == 0
+        finally:
+            await plugin.on_unload()
+
+    asyncio.run(run())
+
+
+def test_verify_covers_named_materials_without_world_entries(make_plugin, monkeypatch, tmp_path):
+    """原版点名找到的素材没有对应词条时，也拿来对照校验。"""
+    from test_workspace import image_bytes
+    ReferenceImage = module("domain.references").ReferenceImage
+
+    async def run():
+        plugin = make_plugin(False)
+        await plugin.on_load()
+        try:
+            await add_provider(plugin, "openai", "Primary", models=["primary-image"])
+            service = plugin._require_draw_service()
+            world, ctx, _store = make_service(
+                tmp_path / "world", llm=SequenceLlm(["结论：PASS"], extract="无"),
+            )
+            world.config.general.world_knowledge_verify_enabled = True
+            service.world_knowledge_service = world
+            calls = capture_attempts(service, monkeypatch)
+            source = image_bytes()
+            material = ReferenceImage(source, "web", "identity", "甘雨")
+            receipt = await draw(
+                plugin, service, "画甘雨", reference_preparation=StubPreparation("", ["web"], [source], [material]),
+            )
+            assert calls[-1]["prompt"] == "画芙宁娜" and calls[-1]["sources"] == 1  # 请求本身不变
+            assert ctx.llm.calls == ["extract", "verify"] and "甘雨" in ctx.llm.prompts["verify"]
+            verify = plugin._task_store.get_task(receipt["task_id"]).world_knowledge["verify"]
+            assert verify["verdict"] == "PASS" and verify["checked"]
+
+            # 关闭校验时，没有词条就不接入
+            world.config.general.world_knowledge_verify_enabled = False
+            ctx.llm.calls.clear()
+            await draw(plugin, service, "画甘雨", reference_preparation=StubPreparation("", ["web"], [source], [material]))
+            assert ctx.llm.calls == ["extract"]
         finally:
             await plugin.on_unload()
 

@@ -45,7 +45,7 @@ class RequestAttemptRunnerMixin:
             if world is not None and position:
                 keep = min(
                     self.world_reference_slots(model, len(world.user_images), primary_attempt.animation),
-                    len(world.resolution.images),
+                    len(world.chosen),
                 )
                 attempt_prompt, attempt_sources, attempt_urls, attempt_task_type = world.request(keep)
             attempt = (

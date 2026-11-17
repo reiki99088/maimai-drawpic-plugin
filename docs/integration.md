@@ -213,7 +213,7 @@ async def draw_bot(ctx, saved_request_id):
 | --- | --- |
 | `[]` | 不自动搜索，只用显式图片和本次允许的配置资产 |
 | `["chat"]` | 仅明确接续前图时读取当前聊天；普通新任务不触发 |
-| `["web"]` | 仅为具体角色、特定物件或明确参考图请求调用管理员选择的搜索服务 |
+| `["web"]` | 仅为具体角色、特定物件或明确参考图请求调用管理员选择的搜索服务；开启世界知识时先试词条库里该对象的参考图，识别不匹配才搜索 |
 | `["chat", "web"]` | 分别按接续前图和具体实体条件触发，已有合适参考时不重复搜索 |
 
 选择 `chat` 必须提供真实可访问的 stream_id；即使没有黑白名单，也不能省略会话校验。**该参数同时沿用结果投递契约**，因此调用前必须确认允许读取该聊天并发送结果。仅填写 stream_id 不等于允许历史搜索。
@@ -578,7 +578,7 @@ async def configure_self_reference(ctx, image_bytes):
 
 返回 `disabled`、`pending`、`entries`、`warnings`、`error`。每个词条含 `id/name/kind/franchise/aliases/look/facts/has_ref/status/sources`：`look` 是不超过 40 字的可见外观，`facts` 为带日期的近期事实（最多 3 条），`sources` 只给来源域名。查询不扣绘图次数，也不取参考图以外的结果；词条是检索资料的整理，调用方仍应把它当作参考而非权威。
 
-`client.lookup_world(text, wait_seconds=25)` 是对应的客户端方法，单次 RPC 的等待按 `wait_seconds` 自动放宽。开启世界知识的任务，task 结构额外带 `world_knowledge`：`entries`（id/name/kind/image_used/sources）、`searched`、`reference_images_sent`、`warnings`、`duration_ms`，开启画后校验时还有 `verify`（`verdict`、`issues`、`redrawn`、`kept` 等）；不含检索词、完整链接或图片内容。客户端结果对应 `DrawingResult.world_knowledge`。
+`client.lookup_world(text, wait_seconds=25)` 是对应的客户端方法，单次 RPC 的等待按 `wait_seconds` 自动放宽。开启世界知识的任务，task 结构额外带 `world_knowledge`：`entries`（id/name/kind/image_used/sources）、`searched`、`reference_images_sent`、`warnings`、`duration_ms`，素材准备按点名找到素材时还有 `material_subjects`，开启画后校验时还有 `verify`（`verdict`、`issues`、`redrawn`、`kept` 等）；不含检索词、完整链接或图片内容。客户端结果对应 `DrawingResult.world_knowledge`。
 
 ## DrawingClient 方法与结果
 

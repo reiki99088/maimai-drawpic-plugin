@@ -49,11 +49,11 @@ class ImageExecutionMixin:
         notified = False
         delivery_started = False
         strict_reference_inputs = False
-        # 世界知识只在两种情况下不加参考图：调用方要求文生图；本次开了原版网络素材搜索（两套不叠加）
-        world_images_allowed = reference_preparation is None or (
-            reference_preparation.required_mode != "draw"
-            and "web" not in reference_preparation.options.material_sources
-        )
+        # 世界知识是参考体系的一个来源：调用方要求文生图时只注入文字，其余情况词条图按原版额度补位
+        world_images_allowed = reference_preparation is None or reference_preparation.required_mode != "draw"
+        world_pending = None
+        world_materials = ()
+        raw_prompt = prompt
 
         async def _update_terminal(**changes) -> None:
             await self.persist_terminal(task_id, **changes)
@@ -108,12 +108,36 @@ class ImageExecutionMixin:
         task_type = "edit_image" if is_image_edit else "draw"
         running_message = "图片正在编辑中" if is_image_edit else "图片正在生成中"
         timeout_message = "图片编辑超时" if is_image_edit else "图片生成超时"
+
+        def _start_world():
+            # 画前检索与素材准备并行，不占素材准备的 90 秒；检索出错只降级
+            try:
+                return self.start_world_knowledge(
+                    task_id=task_id,
+                    prompt=raw_prompt,
+                    model=resolved_model,
+                    source_count=len(normalized_source_images),
+                    animation=animation,
+                    override=world_knowledge,
+                    spare_images=reference_preparation is not None
+                    and bool(reference_preparation.options.material_sources),
+                )
+            except Exception as exc:
+                self.ctx.logger.warning("世界知识启动失败，按原提示词绘图: task_id=%s error_type=%s", task_id, type(exc).__name__)
+                return None
+
         try:
+            if prompt_reviewed:
+                world_pending = _start_world()
             if reference_preparation is not None:
                 await update_task_owned(self.task_store, task_id, status="running", message="正在准备参考图片与预设")
+                finder = self.world_material_finder(world_knowledge)
                 try:
                     async with asyncio.timeout(90):
-                        prepared = await reference_preparation.prepare(task_id)
+                        if finder is not None:
+                            prepared = await reference_preparation.prepare(task_id, world_materials=finder)
+                        else:
+                            prepared = await reference_preparation.prepare(task_id)
                 except TimeoutError:
                     raise TaskRequestError("MATERIAL_PREPARATION_TIMEOUT", "参考素材准备超过 90 秒，请直接提供素材后重试") from None
                 prompt = prepared.prompt
@@ -121,6 +145,7 @@ class ImageExecutionMixin:
                 normalized_source_images, normalized_source_urls = prepared.images, prepared.urls
                 task_type = prepared.task_type
                 strict_reference_inputs = prepared.strict_reference_inputs
+                world_materials = prepared.materials
                 is_image_edit = task_type == "edit_image"
                 running_message = "图片正在编辑中" if is_image_edit else "图片正在生成中"
                 timeout_message = "图片编辑超时" if is_image_edit else "图片生成超时"
@@ -136,6 +161,7 @@ class ImageExecutionMixin:
                     await _notify_task_unsuccessful("failed", "绘图任务已失效")
                     return
                 await self.review_prompt_or_raise(prompt, task_id=task_id)
+                world_pending = _start_world()
             running_record = await update_task_owned(
                 self.task_store,
                 task_id,
@@ -151,16 +177,17 @@ class ImageExecutionMixin:
                 prompt, normalized_source_images, normalized_source_urls, task_type,
             )
             world = None
-            if self.world_knowledge_service is not None:
+            if world_pending is not None and not world_pending.cancelled():
                 try:
-                    world = await self.prepare_world_knowledge(
+                    world = await self.finish_world_knowledge(
+                        world_pending,
                         task_id=task_id,
                         prompt=prompt,
                         model=resolved_model,
                         source_images=normalized_source_images,
                         source_urls=normalized_source_urls,
                         animation=animation,
-                        override=world_knowledge,
+                        materials=world_materials,
                         allow_images=world_images_allowed,
                     )
                 except asyncio.CancelledError:
@@ -452,5 +479,10 @@ class ImageExecutionMixin:
                 exc_info=True,
             )
         finally:
+            if world_pending is not None:
+                if not world_pending.done():
+                    world_pending.cancel()  # 任务提前结束（素材缺失、审核拒绝、取消）时不再等检索
+                elif not world_pending.cancelled():
+                    world_pending.exception()  # 已记过 warning；取走异常，避免未读取告警
             if not notified:
                 await _notify_task_unsuccessful("failed", "任务执行中断，未完成结算")
