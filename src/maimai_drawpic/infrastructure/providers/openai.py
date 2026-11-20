@@ -806,7 +806,11 @@ class OpenaiImage:
         image_bytes_list: list[bytes],
         n: int,
     ) -> list[bytes]:
-        """Responses 后台任务：提交只发一次，取得 ID 后只轮询同一任务，任何失败都不重新生成。"""
+        """Responses 后台任务：提交只发一次，取得 ID 后只轮询同一任务。
+
+        结果阶段的失败一律不在此重新生成；唯一放行给上层重试/备选的是过载、限流这类
+        明确终态 failed 且没有图片的情况（见 _responses_terminal_error）。
+        """
 
         tool_parameters = self._build_images_generation_payload(prompt=prompt, model=model, n=n)
         sizes = [str(tool_parameters.get("size") or "")]
@@ -963,6 +967,12 @@ class OpenaiImage:
         if failure.rejected:
             # 审核拒绝保留分类；submitted_task 会原样抛出，任务终止为 rejected。
             failure.remote_task_id = response_id
+            return failure
+        if status == "failed" and failure.retryable:
+            # 过载/限流导致的终态 failed：远端任务已结束且没有图片，重新提交不会重复出图，
+            # 按容量错误放行重试与备选模型（否则配置的备选永远不生效）。
+            failure.remote_task_id = response_id
+            failure.resubmit_safe = True
             return failure
         return ProviderResultError(str(failure))
 

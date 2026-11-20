@@ -195,6 +195,33 @@ def test_terminal_failure_is_submitted_error_without_resubmit(status: str, body:
     assert len(provider.posted) == 1
 
 
+@pytest.mark.parametrize("code", ["server_is_overloaded", "rate_limit_exceeded"])
+def test_capacity_terminal_failure_allows_retry_and_fallback(code: str) -> None:
+    provider = FakeResponses(
+        [{"id": "resp_o", "status": "queued"}],
+        [{"id": "resp_o", "status": "failed", "error": {"code": code, "message": "Our servers are overloaded"}}],
+    )
+    with pytest.raises(OpenAIRequestError) as captured:
+        asyncio.run(provider.generate_images("cat", "gpt-image-2"))
+    failure = captured.value
+    assert failure.resubmit_safe and failure.retryable and failure.allow_fallback
+    assert not failure.rejected and not failure.outcome_unknown
+    assert failure.remote_task_id == "resp_o" and code in str(failure)
+    assert len(provider.posted) == 1 and provider.cancelled == []
+
+
+@pytest.mark.parametrize("status,body", [
+    ("incomplete", {"incomplete_details": {"reason": "server_is_overloaded"}}),
+    ("cancelled", {"error": {"code": "rate_limit_exceeded", "message": "x"}}),
+    ("failed", {"error": {"code": "insufficient_quota", "message": "x"}}),
+])
+def test_capacity_code_outside_failed_status_still_never_resubmits(status: str, body: Dict[str, Any]) -> None:
+    provider = FakeResponses([{"id": "resp_k", "status": "queued"}], [{"id": "resp_k", "status": status, **body}])
+    with pytest.raises(ProviderSubmittedError) as captured:
+        asyncio.run(provider.generate_images("cat", "gpt-image-2"))
+    assert not captured.value.retryable and not captured.value.allow_fallback
+
+
 def test_moderation_failure_stays_rejected() -> None:
     provider = FakeResponses(
         [{"id": "resp_m", "status": "queued"}],

@@ -8,6 +8,9 @@ class ProviderError(RuntimeError):
     allow_fallback = False
     rejected = False
     outcome_unknown = False
+    #: 远端任务已明确终态失败且没有产出图片（如过载、限流），重新提交不会重复出图；
+    #: 受理后的结果阶段据此放行，按 retryable/allow_fallback 重试或切换备选。
+    resubmit_safe = False
 
 
 class ProviderRequestError(ProviderError):
@@ -38,7 +41,13 @@ class ProviderRequestError(ProviderError):
             and not quota
             and (
                 status == 429
-                or normalized in {"server_busy", "service_unavailable", "model_overloaded", "rate_limit_exceeded"}
+                or normalized in {
+                    "server_busy",
+                    "service_unavailable",
+                    "model_overloaded",
+                    "server_is_overloaded",
+                    "rate_limit_exceeded",
+                }
             )
         )
         self.allow_fallback = not self.rejected and (400 <= status < 500 or self.retryable)

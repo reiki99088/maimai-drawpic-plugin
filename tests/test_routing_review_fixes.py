@@ -495,6 +495,50 @@ def test_negative_prompt_fallback_uses_each_instance_settings(make_plugin, monke
     asyncio.run(run())
 
 
+def test_responses_overloaded_terminal_failure_falls_back_to_backup_model(make_plugin, monkeypatch):
+    async def run():
+        plugin = make_plugin(False)
+        await plugin.on_load()
+        try:
+            await add_provider(
+                plugin, "openai", "Primary", models=["gpt-image-2.6-sunburst"],
+                request_mode="responses_background", responses_poll_interval_seconds=0,
+            )
+            await add_provider(plugin, "openai", "Backup", models=["gpt-image-2.6-flare"])
+            await set_settings(plugin, fallback_models=["Backup/gpt-image-2.6-flare"], request_retry_count=1)
+            posts, gets = [], []
+
+            async def post(provider, url, payload):
+                if url.endswith("/responses"):
+                    posts.append(payload["tools"][0]["model"])
+                    return {"id": f"resp_{len(posts)}", "status": "queued"}
+                posts.append(payload["model"])
+                return {"data": [{"b64_json": base64.b64encode(image_bytes()).decode("ascii")}]}
+
+            async def get(provider, url):
+                gets.append(url.rsplit("/", 1)[-1])
+                return {
+                    "id": gets[-1], "status": "failed",
+                    "error": {"code": "server_is_overloaded", "message": "Our servers are currently overloaded."},
+                }
+
+            openai = module("infrastructure.providers.openai").OpenaiImage
+            monkeypatch.setattr(openai, "_post_json", post)
+            monkeypatch.setattr(openai, "_get_json", get)
+            service = plugin._require_draw_service()
+            receipt = await plugin.drawpic_submit("a cat", model="Primary/gpt-image-2.6-sunburst")
+            await asyncio.gather(*tuple(service.background_tasks))
+            result = await plugin.drawpic_task(receipt["task_id"])
+            assert result["status"] == "completed", result["message"]
+            # 首选按重试次数各提交一次新任务（每次都已终态失败），然后切到备选出图。
+            assert posts == ["gpt-image-2.6-sunburst", "gpt-image-2.6-sunburst", "gpt-image-2.6-flare"]
+            assert gets == ["resp_1", "resp_2"]
+        finally:
+            await plugin.on_unload()
+
+    asyncio.run(run())
+
+
 def test_negative_prompt_rewrite_failure_stops_submission_and_redacts_errors(make_plugin, monkeypatch):
     async def run():
         plugin = make_plugin(False)

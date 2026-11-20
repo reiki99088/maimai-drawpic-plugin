@@ -37,14 +37,14 @@ def generation_submission(operation: Callable[_P, Awaitable[_T]]) -> Callable[_P
 
 @asynccontextmanager
 async def submitted_task(provider: str, remote_task_id: str) -> AsyncIterator[None]:
-    """取得 ID 后收紧整个结果阶段的错误语义，同时保留审核拒绝和取消。"""
+    """取得 ID 后收紧整个结果阶段的错误语义，同时保留审核拒绝、明确未出图的终态失败和取消。"""
 
     try:
         yield
     except ProviderSubmittedError:
         raise
     except Exception as exc:
-        if isinstance(exc, ProviderError) and exc.rejected:
+        if isinstance(exc, ProviderError) and (exc.rejected or exc.resubmit_safe):
             raise
         unknown = isinstance(exc, (TimeoutError, aiohttp.ClientError, ProviderOutcomeUnknown, ProviderConnectionError))
         reason = "查询连接失败或超时，结果未确认" if unknown else sanitize_provider_text(str(exc))
