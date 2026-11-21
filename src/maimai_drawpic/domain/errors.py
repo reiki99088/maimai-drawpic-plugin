@@ -82,6 +82,18 @@ class ProviderBusyError(ProviderConnectionError):
     allow_fallback = True
 
 
+class ProviderStalledError(ProviderError):
+    """远端任务超过等待上限，已主动取消并确认终态无图片；重新提交不会重复出图。"""
+
+    retryable = True
+    allow_fallback = True
+    resubmit_safe = True
+
+    def __init__(self, message: str, remote_task_id: str) -> None:
+        super().__init__(message)
+        self.remote_task_id = remote_task_id
+
+
 class ProviderSubmittedError(ProviderResultError):
     """保留已受理的远端 ID；后续失败绝不能重新提交生成。"""
 

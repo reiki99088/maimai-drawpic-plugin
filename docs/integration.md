@@ -729,7 +729,7 @@ async def resume_drawing(ctx, saved, wait_seconds=120):
 | `SOURCE_IMAGE_REQUIRED` / `TASK_MODE_CONFLICT` | 缺少真实图或新参考请求与显式模式冲突 |
 | `MODERATION_REJECTED` | 提示词/图片审核拒绝，停止任务 |
 | `UPSTREAM_UNCONFIRMED` / `RESTART_UNCONFIRMED` | 远端受理结果未知或重启中断；核对提供商/聊天记录，禁止自动重画 |
-| `UPSTREAM_UNREACHABLE` / `UPSTREAM_REJECTED` | 明确连接不可达或提供商拒绝；读取具体 retry 字段 |
+| `UPSTREAM_UNREACHABLE` / `UPSTREAM_REJECTED` | 明确连接不可达或提供商拒绝；读取具体 retry 字段（远端确认终止且未出图时，如过载或卡住后已取消，`retry_submit=true`） |
 | `RESULT_NOT_READY` / `RESULT_EXPIRED` / `RESULT_UNAVAILABLE` | 暂无结果、已过期或未能缓存；查询/读取错误不证明应重画 |
 | `SUBMISSION_UNKNOWN` | 客户端未取得可信受理回执，保留原键只读恢复 |
 | `RESULT_TOO_LARGE` | 客户端读取预算不足，保留原任务与引用，不重新生成 |

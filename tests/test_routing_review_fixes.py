@@ -539,6 +539,50 @@ def test_responses_overloaded_terminal_failure_falls_back_to_backup_model(make_p
     asyncio.run(run())
 
 
+def test_responses_stalled_task_is_cancelled_then_resubmitted_on_same_model(make_plugin, monkeypatch):
+    async def run():
+        plugin = make_plugin(False)
+        await plugin.on_load()
+        try:
+            await add_provider(
+                plugin, "openai", "Primary", models=["gpt-image-2.6-flare"],
+                request_mode="responses_background", responses_poll_interval_seconds=0.05,
+            )
+            # 最小整体超时 5s：第 4.5s 起本端取消卡住的任务并确认终止，然后按重试次数重新提交。
+            await set_settings(plugin, request_timeout_seconds=5, request_retry_count=1)
+            posts, cancelled = [], []
+            result_png = base64.b64encode(image_bytes()).decode("ascii")
+
+            async def post(provider, url, payload):
+                posts.append(url.rsplit("/", 1)[-1])
+                return {"id": f"resp_{len(posts)}", "status": "queued"}
+
+            async def get(provider, url):
+                response_id = url.rsplit("/", 1)[-1]
+                if response_id == "resp_1":
+                    return {"id": response_id, "status": "cancelled" if cancelled else "in_progress"}
+                return {"id": response_id, "status": "completed", "output": [
+                    {"type": "image_generation_call", "status": "completed", "result": result_png}]}
+
+            async def cancel(provider, response_id):
+                cancelled.append(response_id)
+
+            openai = module("infrastructure.providers.openai").OpenaiImage
+            monkeypatch.setattr(openai, "_post_json", post)
+            monkeypatch.setattr(openai, "_get_json", get)
+            monkeypatch.setattr(openai, "_cancel_response", cancel)
+            service = plugin._require_draw_service()
+            receipt = await plugin.drawpic_submit("a cat", model="Primary/gpt-image-2.6-flare")
+            await asyncio.gather(*tuple(service.background_tasks))
+            result = await plugin.drawpic_task(receipt["task_id"])
+            assert result["status"] == "completed", result["message"]
+            assert posts == ["responses", "responses"] and cancelled == ["resp_1"]
+        finally:
+            await plugin.on_unload()
+
+    asyncio.run(run())
+
+
 def test_negative_prompt_rewrite_failure_stops_submission_and_redacts_errors(make_plugin, monkeypatch):
     async def run():
         plugin = make_plugin(False)

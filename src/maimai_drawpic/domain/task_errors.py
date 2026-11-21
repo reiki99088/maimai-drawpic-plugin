@@ -31,6 +31,9 @@ def provider_task_error(failure: ProviderError, message: str) -> Dict[str, Any]:
         return task_error("MODERATION_REJECTED", message)
     if failure.outcome_unknown or isinstance(failure, ProviderOutcomeUnknown):
         return task_error("UPSTREAM_UNCONFIRMED", message)
+    if failure.resubmit_safe:
+        # 远端已确认终止且没有图片（过载、卡住后取消）：调用方可以安全地重新提交。
+        return task_error("UPSTREAM_REJECTED", message, retry_submit=True)
     if isinstance(failure, (ProviderResultError, ProviderSubmittedError)):
         return task_error("RESULT_UNAVAILABLE", message)
     if isinstance(failure, ProviderConnectionError):

@@ -22,7 +22,13 @@ from ..media.images import (
     validate_image_bytes,
 )
 from ..media.downloads import download_image
-from ...domain.errors import ProviderError, ProviderOutcomeUnknown, ProviderRequestError, ProviderResultError
+from ...domain.errors import (
+    ProviderError,
+    ProviderOutcomeUnknown,
+    ProviderRequestError,
+    ProviderResultError,
+    ProviderStalledError,
+)
 from ..http import HttpProxySettings, read_response_json, read_response_text
 from ...domain.models.animation import GIF_INCOMPATIBLE_PARAMETERS, AnimationOptions
 from ...domain.models.openai_profiles import (
@@ -43,6 +49,13 @@ from ...domain.models.rinkoai_profiles import (
     is_rinkoai_host,
     is_rinkoai_nai_model,
 )
+
+
+#: Responses 后台任务在整体超时前多久主动取消卡住的任务（另受超时的 10% 限制），用于取消并确认状态。
+RESPONSES_EXPIRE_MARGIN_SECONDS = 20.0
+#: 取消后确认状态的单次查询上限与次数。
+RESPONSES_EXPIRE_QUERY_TIMEOUT_SECONDS = 5.0
+RESPONSES_EXPIRE_QUERY_ATTEMPTS = 3
 
 
 class OpenAIRequestError(ProviderRequestError):
@@ -808,10 +821,17 @@ class OpenaiImage:
     ) -> list[bytes]:
         """Responses 后台任务：提交只发一次，取得 ID 后只轮询同一任务。
 
-        结果阶段的失败一律不在此重新生成；唯一放行给上层重试/备选的是过载、限流这类
-        明确终态 failed 且没有图片的情况（见 _responses_terminal_error）。
+        结果阶段的失败一律不在此重新生成；放行给上层重试/备选的只有远端确认没有图片的终态：
+        过载、限流导致的 failed（见 _responses_terminal_error），以及超过等待上限后由本端
+        取消并确认已终止的卡住任务（见 _expire_response）。
         """
 
+        # 外层按 request_timeout_seconds 整体限时；本端提前一点自行取消卡住的任务，留出取消与确认的时间。
+        hard_deadline = time.monotonic() + self.request_timeout_seconds
+        expire_margin = min(RESPONSES_EXPIRE_MARGIN_SECONDS, self.request_timeout_seconds * 0.1)
+        poll_deadline = hard_deadline - expire_margin
+        # 取消后的确认必须在外层超时前结束，否则会被外层取消成「结果不确定」。
+        confirm_deadline = hard_deadline - expire_margin * 0.25
         tool_parameters = self._build_images_generation_payload(prompt=prompt, model=model, n=n)
         sizes = [str(tool_parameters.get("size") or "")]
         if image_bytes_list and self.edit_size_mode != "configured":
@@ -866,7 +886,9 @@ class OpenaiImage:
             try:
                 final = accepted
                 if str(accepted.get("status") or "") in RESPONSES_PENDING_STATUSES:
-                    final = await self._poll_response(response_id, model)
+                    final = await self._poll_response(
+                        response_id, model, poll_deadline=poll_deadline, confirm_deadline=confirm_deadline
+                    )
                 images = await self._extract_responses_images(final, response_id, model)
                 for image_bytes in images:
                     await asyncio.to_thread(validate_image_bytes, image_bytes)
@@ -876,14 +898,29 @@ class OpenaiImage:
                 await self._cancel_response(response_id)
                 raise
 
-    async def _poll_response(self, response_id: str, model: str) -> dict[str, Any]:
-        """轮询后台任务，仅在状态变化时记录日志。"""
+    async def _poll_response(
+        self,
+        response_id: str,
+        model: str,
+        *,
+        poll_deadline: float | None = None,
+        confirm_deadline: float | None = None,
+    ) -> dict[str, Any]:
+        """轮询后台任务，仅在状态变化时记录日志；超过 poll_deadline 交给 _expire_response。"""
 
         url = self._build_api_url(f"responses/{response_id}")
         started_at = time.monotonic()
         previous_status = "queued"
         while True:
-            await asyncio.sleep(self.responses_poll_interval_seconds)
+            if poll_deadline is not None:
+                remaining = poll_deadline - time.monotonic()
+                if remaining <= 0:
+                    return await self._expire_response(
+                        url, response_id, model, started_at, confirm_deadline or poll_deadline
+                    )
+                await asyncio.sleep(min(self.responses_poll_interval_seconds, remaining))
+            else:
+                await asyncio.sleep(self.responses_poll_interval_seconds)
             response = await query_submitted_task(
                 lambda: self._get_json(url),
                 poll_interval=self.responses_poll_interval_seconds,
@@ -905,6 +942,59 @@ class OpenaiImage:
                 raise self._responses_terminal_error(response, response_id, model, status)
             if status not in RESPONSES_PENDING_STATUSES:
                 raise RuntimeError(f"OpenAI Responses 后台任务 {response_id} 返回未知状态 {status or 'MISSING'}")
+
+    async def _expire_response(
+        self, url: str, response_id: str, model: str, started_at: float, confirm_deadline: float
+    ) -> dict[str, Any]:
+        """等待超限：取消远端任务并确认终态。
+
+        - 取消前刚好完成：照常返回结果；
+        - 确认已终止（cancelled/failed/incomplete）：远端不会再出图，抛 ProviderStalledError 允许重新提交；
+        - 无法确认：抛 TimeoutError，由 submitted_task 判为结果不确定，不重绘。
+        """
+
+        waited = time.monotonic() - started_at
+        self._log_warning(
+            "OpenAI Responses 后台任务超过等待上限，取消并确认状态: model=%s response_id=%s waited=%.2fs",
+            model,
+            response_id,
+            waited,
+        )
+        await self._cancel_response(response_id)
+        status = ""
+        for attempt in range(RESPONSES_EXPIRE_QUERY_ATTEMPTS):
+            remaining = confirm_deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            if attempt:
+                await asyncio.sleep(min(1.0, remaining / 2))
+            try:
+                response = await asyncio.wait_for(
+                    self._get_json(url), timeout=min(RESPONSES_EXPIRE_QUERY_TIMEOUT_SECONDS, remaining)
+                )
+            except (TimeoutError, aiohttp.ClientError):
+                continue
+            status = str(response.get("status") or "").strip().lower()
+            if status == "completed":
+                self._log_info(
+                    "OpenAI Responses 后台任务在取消前已完成，照常取图: model=%s response_id=%s", model, response_id
+                )
+                return response
+            if status in RESPONSES_FAILED_STATUSES:
+                self._log_warning(
+                    "OpenAI Responses 卡住的后台任务已确认终止，允许重新提交: model=%s response_id=%s status=%s",
+                    model,
+                    response_id,
+                    status,
+                )
+                raise ProviderStalledError(
+                    f"OpenAI Responses 任务 {response_id} 等待 {waited:.0f}s 仍未完成，已取消并确认终止"
+                    f"（status={status}），未出图，可重新提交",
+                    response_id,
+                )
+        raise TimeoutError(
+            f"OpenAI Responses 任务 {response_id} 等待超限，取消后未能确认终态（最后状态 {status or '未知'}）"
+        )
 
     async def _get_json(self, url: str) -> dict[str, Any]:
         """只读查询，不属于生成提交边界；断线由 query_submitted_task 恢复同一 ID。"""

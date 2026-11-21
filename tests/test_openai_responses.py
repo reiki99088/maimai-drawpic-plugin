@@ -18,6 +18,7 @@ from maimai_drawpic_pkg.src.maimai_drawpic.application.routing import ProviderRo
 from maimai_drawpic_pkg.src.maimai_drawpic.domain.configuration.models import DrawpicConfig  # noqa: E402
 from maimai_drawpic_pkg.src.maimai_drawpic.domain.errors import (  # noqa: E402
     ProviderResultError,
+    ProviderStalledError,
     ProviderSubmittedError,
 )
 from maimai_drawpic_pkg.src.maimai_drawpic.domain.models.openai_profiles import (  # noqa: E402
@@ -251,6 +252,48 @@ def test_poll_disconnect_recovers_on_same_id() -> None:
     )
     assert asyncio.run(provider.generate_images("cat", "gpt-image-2")) == [result]
     assert len(provider.posted) == 1 and len(provider.get_urls) == 2
+
+
+class StuckResponses(FakeResponses):
+    """一直 in_progress，直到收到取消；取消后返回 after_cancel 指定的状态。"""
+
+    def __init__(self, after_cancel: Dict[str, Any], **kwargs: Any) -> None:
+        kwargs.setdefault("request_timeout_seconds", 1)
+        kwargs.setdefault("responses_poll_interval_seconds", 0.02)
+        super().__init__([{"id": "resp_s", "status": "queued"}], **kwargs)
+        self.after_cancel = after_cancel
+
+    async def _get_json(self, url: str) -> Dict[str, Any]:
+        self.get_urls.append(url)
+        if self.cancelled:
+            return {"id": "resp_s", **self.after_cancel}
+        return {"id": "resp_s", "status": "in_progress"}
+
+
+def test_stalled_task_is_cancelled_and_confirmed_then_resubmit_safe() -> None:
+    provider = StuckResponses({"status": "cancelled"})
+    with pytest.raises(ProviderStalledError) as captured:
+        asyncio.run(asyncio.wait_for(provider.generate_images("cat", "gpt-image-2"), timeout=1))
+    failure = captured.value
+    assert failure.resubmit_safe and failure.retryable and failure.allow_fallback
+    assert not failure.outcome_unknown and failure.remote_task_id == "resp_s"
+    assert "status=cancelled" in str(failure)
+    assert provider.cancelled == ["resp_s"] and len(provider.posted) == 1
+
+
+def test_stalled_task_completed_during_cancel_still_returns_image() -> None:
+    result = png()
+    provider = StuckResponses(completed(result, "resp_s"))
+    assert asyncio.run(asyncio.wait_for(provider.generate_images("cat", "gpt-image-2"), timeout=1)) == [result]
+    assert provider.cancelled == ["resp_s"] and len(provider.posted) == 1
+
+
+def test_stalled_task_unconfirmed_after_cancel_stays_unknown() -> None:
+    provider = StuckResponses({"status": "in_progress"})
+    with pytest.raises(ProviderSubmittedError) as captured:
+        asyncio.run(asyncio.wait_for(provider.generate_images("cat", "gpt-image-2"), timeout=1))
+    assert captured.value.outcome_unknown and not captured.value.retryable
+    assert provider.cancelled == ["resp_s"] and len(provider.posted) == 1
 
 
 def test_cancellation_and_outer_timeout_send_cancel() -> None:
